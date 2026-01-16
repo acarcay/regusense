@@ -1,8 +1,18 @@
 """
-Contradiction Engine for Political Statement Analysis.
+Knowledge Graph-based Contradiction Engine.
 
-Uses semantic search (RAG) and LLM verification to detect contradictions,
-U-turns, and inconsistencies in political statements.
+Refactored contradiction detection using:
+1. Entity extraction (GLiNER/rule-based) for Person, Topic, Date
+2. Knowledge Graph for statement-entity relationships
+3. Evidence-based LLM analysis with structured output
+
+Output format:
+{
+    "contradiction_score": 0-10,
+    "evidence_1": {"text": "...", "date": "..."},
+    "evidence_2": {"text": "...", "date": "..."},
+    "explanation": "..."
+}
 
 Author: ReguSense Team
 """
@@ -17,48 +27,80 @@ from typing import Any, Optional
 
 from thefuzz import process as fuzz_process
 
+from intelligence.entity_extractor import EntityExtractor, get_entity_extractor
+from intelligence.knowledge_graph import KnowledgeGraph, get_knowledge_graph, EvidencePair
+
 logger = logging.getLogger(__name__)
 
 
+# =============================================================================
+# Types
+# =============================================================================
+
 class ContradictionType(Enum):
     """Types of contradictions detected."""
-    REVERSAL = "REVERSAL"           # Complete reversal of position
+    REVERSAL = "REVERSAL"              # Complete reversal of position
     BROKEN_PROMISE = "BROKEN_PROMISE"  # Failed to deliver on promise
-    INCONSISTENCY = "INCONSISTENCY"  # Inconsistent statements
-    NONE = "NONE"                    # No contradiction
+    INCONSISTENCY = "INCONSISTENCY"    # Inconsistent statements
+    PERSONA_SHIFT = "PERSONA_SHIFT"    # Change in persona/stance
+    NONE = "NONE"                      # No contradiction
+
+
+@dataclass
+class Evidence:
+    """A single piece of evidence."""
+    text: str
+    date: str = ""
+    source: str = ""
+    source_type: str = ""
+    topics: list[str] = field(default_factory=list)
+    
+    def to_dict(self) -> dict:
+        return {
+            "text": self.text,
+            "date": self.date,
+            "source": self.source,
+            "source_type": self.source_type,
+            "topics": self.topics,
+        }
 
 
 @dataclass
 class ContradictionResult:
-    """Result of a contradiction detection analysis.
+    """
+    Result of contradiction analysis.
     
-    Attributes:
-        new_statement: The new statement being analyzed
-        speaker: Speaker of the new statement
-        historical_matches: List of matching historical statements
-        contradiction_score: 0-100 score (higher = more contradictory)
-        contradiction_type: Type of contradiction detected
-        explanation: Turkish explanation of the contradiction
-        key_conflict_points: List of specific conflict points
-        is_contradiction: Whether score exceeds threshold (default 70)
-        analysis_timestamp: When the analysis was performed
+    Now uses 0-10 scale and evidence-based format.
     """
     new_statement: str
     speaker: str = ""
-    historical_matches: list[dict] = field(default_factory=list)
+    
+    # Evidence-based output
+    evidence_1: Optional[Evidence] = None
+    evidence_2: Optional[Evidence] = None
+    
+    # Scoring (0-10 scale)
     contradiction_score: int = 0
     contradiction_type: ContradictionType = ContradictionType.NONE
+    
+    # Analysis
     explanation: str = ""
     key_conflict_points: list[str] = field(default_factory=list)
+    
+    # Derived
     is_contradiction: bool = False
     analysis_timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
     
+    # Legacy compatibility
+    historical_matches: list[dict] = field(default_factory=list)
+    
     def to_dict(self) -> dict:
-        """Convert to dictionary for serialization."""
+        """Convert to dictionary."""
         return {
             "new_statement": self.new_statement,
             "speaker": self.speaker,
-            "historical_matches": self.historical_matches,
+            "evidence_1": self.evidence_1.to_dict() if self.evidence_1 else None,
+            "evidence_2": self.evidence_2.to_dict() if self.evidence_2 else None,
             "contradiction_score": self.contradiction_score,
             "contradiction_type": self.contradiction_type.value,
             "explanation": self.explanation,
@@ -68,275 +110,358 @@ class ContradictionResult:
         }
     
     def __str__(self) -> str:
-        """Human-readable representation."""
-        status = "⚠️ CONTRADICTION" if self.is_contradiction else "✓ Consistent"
+        status = "⚠️ ÇELİŞKİ" if self.is_contradiction else "✓ Tutarlı"
         return (
             f"{status}\n"
-            f"  Score: {self.contradiction_score}/100\n"
-            f"  Type: {self.contradiction_type.value}\n"
-            f"  Speaker: {self.speaker}\n"
-            f"  Explanation: {self.explanation}"
+            f"  Skor: {self.contradiction_score}/10\n"
+            f"  Tip: {self.contradiction_type.value}\n"
+            f"  Konuşmacı: {self.speaker}\n"
+            f"  Açıklama: {self.explanation}"
         )
 
 
+# =============================================================================
+# Contradiction Detector
+# =============================================================================
+
 class ContradictionDetector:
-    """Detects contradictions between new and historical political statements.
+    """
+    Knowledge Graph-based contradiction detector.
     
-    Uses a 3-step process:
-    1. Retrieval: Find semantically similar historical statements
-    2. Verification: Use LLM to analyze for contradictions
-    3. Scoring: Return structured contradiction assessment
+    Process:
+    1. Extract entities from new statement (Person, Topic, Date)
+    2. Query knowledge graph for related past statements
+    3. Find evidence pairs (same speaker, same topic, different times)
+    4. Send to LLM for contradiction analysis
+    5. Return structured result with score 0-10
     
     Example:
-        >>> from memory.vector_store import PoliticalMemory
-        >>> from intelligence.gemini_analyzer import GeminiAnalyst
-        >>> 
-        >>> memory = PoliticalMemory()
-        >>> analyzer = GeminiAnalyst()
-        >>> detector = ContradictionDetector(memory, analyzer)
-        >>> 
-        >>> result = detector.detect(
-        ...     "Enflasyon tek haneye düşecek",
-        ...     speaker="Mehmet Şimşek"
-        ... )
-        >>> print(result.contradiction_score)
+        detector = ContradictionDetector(memory, analyzer)
+        result = detector.detect(
+            "Enflasyon tek haneye düşecek",
+            speaker="Mehmet Şimşek"
+        )
+        print(f"Skor: {result.contradiction_score}/10")
+        print(f"Kanıt 1: {result.evidence_1.text}")
+        print(f"Kanıt 2: {result.evidence_2.text}")
     """
     
-    DEFAULT_TOP_K = 5
-    DEFAULT_THRESHOLD = 70
+    DEFAULT_THRESHOLD = 6  # 6/10 = contradiction
     
     def __init__(
         self,
-        memory: Any,  # PoliticalMemory
-        analyzer: Any,  # GeminiAnalyst
-        top_k: int = DEFAULT_TOP_K,
+        memory: Any,  # PoliticalMemory for vector search fallback
+        analyzer: Any,  # GeminiAnalyst for LLM analysis
+        knowledge_graph: Optional[KnowledgeGraph] = None,
+        entity_extractor: Optional[EntityExtractor] = None,
         contradiction_threshold: int = DEFAULT_THRESHOLD,
     ):
         """
-        Initialize the contradiction detector.
+        Initialize detector.
         
         Args:
-            memory: PoliticalMemory instance for vector search
-            analyzer: GeminiAnalyst instance for LLM verification
-            top_k: Number of historical matches to retrieve
-            contradiction_threshold: Score threshold for is_contradiction flag
+            memory: PoliticalMemory for vector search
+            analyzer: GeminiAnalyst for LLM
+            knowledge_graph: Optional KnowledgeGraph instance
+            entity_extractor: Optional EntityExtractor instance
+            contradiction_threshold: Score threshold (0-10 scale)
         """
         self.memory = memory
         self.analyzer = analyzer
-        self.top_k = top_k
+        self.graph = knowledge_graph or get_knowledge_graph()
+        self.extractor = entity_extractor or get_entity_extractor()
         self.contradiction_threshold = contradiction_threshold
-        self._speaker_cache: Optional[set[str]] = None  # Cache for speaker names
         
-        logger.info(f"ContradictionDetector initialized (top_k={top_k}, threshold={contradiction_threshold})")
+        self._speaker_cache: Optional[set[str]] = None
+        
+        logger.info(
+            f"ContradictionDetector initialized (threshold={contradiction_threshold}/10, "
+            f"graph_statements={self.graph.stats()['total_statements']})"
+        )
     
-    def _resolve_speaker_name(
-        self,
-        input_name: str,
-        min_score: int = 65,
-    ) -> tuple[str, int]:
-        """
-        Resolve a user-provided speaker name to the official name in the database.
+    def _resolve_speaker(self, name: str, min_score: int = 65) -> str:
+        """Resolve speaker name using fuzzy matching."""
+        if not name or not name.strip():
+            return name
         
-        Uses fuzzy matching to find the best match from known speakers.
-        Handles Turkish characters correctly.
-        
-        Args:
-            input_name: User-provided speaker name (e.g., "Mahinur")
-            min_score: Minimum fuzzy match score to accept (0-100)
-            
-        Returns:
-            Tuple of (resolved_name, match_score)
-            If no good match found, returns (input_name, 0)
-        """
-        if not input_name or not input_name.strip():
-            return (input_name, 0)
-        
-        # Get unique speakers from memory (cache for performance)
         if self._speaker_cache is None:
             self._speaker_cache = self.memory.get_unique_speakers()
-            logger.debug(f"Loaded {len(self._speaker_cache)} unique speakers into cache")
         
         if not self._speaker_cache:
-            logger.debug("No speakers in database, returning input as-is")
-            return (input_name, 0)
+            return name
         
-        # Convert to list for thefuzz
-        speaker_list = list(self._speaker_cache)
-        
-        # Use thefuzz to find best match
         try:
-            result = fuzz_process.extractOne(
-                input_name,
-                speaker_list,
-                score_cutoff=0,  # Get result even if low score
-            )
-            
-            if result:
-                matched_name, score = result[0], result[1]
-                
-                if score >= min_score:
-                    logger.info(
-                        f"Resolved speaker: '{input_name}' → '{matched_name}' (Score: {score})"
-                    )
-                    return (matched_name, score)
-                else:
-                    logger.warning(
-                        f"Low match score for '{input_name}': best match '{matched_name}' "
-                        f"with score {score} (threshold: {min_score})"
-                    )
-                    return (input_name, score)
-            
+            result = fuzz_process.extractOne(name, list(self._speaker_cache))
+            if result and result[1] >= min_score:
+                logger.info(f"Resolved speaker: '{name}' → '{result[0]}' ({result[1]}%)")
+                return result[0]
         except Exception as e:
-            logger.warning(f"Fuzzy matching failed: {e}")
+            logger.debug(f"Fuzzy match failed: {e}")
         
-        return (input_name, 0)
+        return name
     
-    def clear_speaker_cache(self) -> None:
-        """Clear the speaker name cache (call after ingesting new data)."""
-        self._speaker_cache = None
-        logger.debug("Speaker cache cleared")
+    def _extract_and_index(
+        self,
+        text: str,
+        speaker: str,
+        date: str = "",
+        source: str = "",
+        source_type: str = "",
+    ) -> None:
+        """Extract entities and add to knowledge graph."""
+        result = self.extractor.extract(text)
+        
+        self.graph.add_statement(
+            text=text,
+            speaker=speaker,
+            topics=result.topics,
+            date=date,
+            source=source,
+            source_type=source_type,
+            entities={
+                "persons": result.persons,
+                "organizations": result.organizations,
+            },
+        )
     
-    def _retrieve(
+    def _get_evidence_from_graph(
+        self,
+        speaker: str,
+        topics: list[str],
+    ) -> Optional[EvidencePair]:
+        """Get best evidence pair from knowledge graph."""
+        for topic in topics:
+            pairs = self.graph.get_evidence_pairs(
+                speaker=speaker,
+                topic=topic,
+                min_time_delta_days=30,
+            )
+            if pairs:
+                return pairs[0]  # Return best pair
+        
+        return None
+    
+    def _get_evidence_from_vector(
         self,
         query: str,
-        speaker_filter: Optional[str] = None,
+        speaker: str,
     ) -> list[dict]:
-        """
-        Retrieve relevant historical statements.
-        
-        Args:
-            query: The new statement to search against
-            speaker_filter: Optional filter by speaker name
-            
-        Returns:
-            List of matched statements as dictionaries
-        """
+        """Fallback to vector search for evidence."""
         matches = self.memory.search(
             query_text=query,
-            top_k=self.top_k,
-            speaker_filter=speaker_filter,
+            top_k=5,
+            speaker_filter=speaker if speaker else None,
         )
         
-        # Convert to dict format
         return [
             {
                 "text": m.text,
-                "speaker": m.speaker,
                 "date": m.date,
-                "similarity": m.similarity,
+                "speaker": m.speaker,
                 "source": m.source,
                 "source_type": m.source_type,
-                "page_number": m.page_number,
             }
             for m in matches
         ]
     
-    def _verify(
+    def _analyze_with_llm(
         self,
         new_statement: str,
-        historical_statements: list[dict],
-        speaker: str = "",
+        evidence_1: dict,
+        evidence_2: Optional[dict],
+        speaker: str,
     ) -> dict:
         """
-        Verify contradictions using LLM.
+        Send evidence pair to LLM for contradiction analysis.
         
-        Args:
-            new_statement: The new statement
-            historical_statements: List of historical statement dicts
-            speaker: Speaker name for context
-            
-        Returns:
-            LLM analysis result as dictionary
+        Uses specialized prompt for evidence-based comparison.
         """
-        # Use the analyzer's contradiction analysis method
-        return self.analyzer.analyze_contradiction(
-            new_statement=new_statement,
-            historical_statements=historical_statements,
-            speaker=speaker,
-        )
+        prompt = f"""Sen bir siyasi çelişki analisti'sin. Aşağıdaki iki açıklamayı karşılaştır.
+
+## Konuşmacı
+{speaker}
+
+## Kanıt 1 (Eski Açıklama)
+Tarih: {evidence_1.get('date', 'Bilinmiyor')}
+Kaynak: {evidence_1.get('source_type', 'Bilinmiyor')}
+Açıklama: "{evidence_1.get('text', '')[:1000]}"
+
+## Kanıt 2 (Yeni Açıklama)
+Tarih: Şu an
+Açıklama: "{new_statement}"
+
+## Görev
+Bu iki açıklama arasındaki tutarsızlığı analiz et.
+
+## Yanıt Formatı (JSON)
+{{
+    "contradiction_score": <0-10 arası puan, 0=tamamen tutarlı, 10=tam çelişki>,
+    "contradiction_type": "<REVERSAL|BROKEN_PROMISE|INCONSISTENCY|PERSONA_SHIFT|NONE>",
+    "explanation": "<Türkçe açıklama, 1-2 cümle>",
+    "key_conflict_points": ["<çelişki noktası 1>", "<çelişki noktası 2>"]
+}}
+
+Sadece JSON döndür, başka bir şey yazma."""
+
+        try:
+            response = self.analyzer._generate_with_retry(prompt)
+            
+            # Parse JSON from response
+            import json
+            import re
+            
+            # Extract JSON block
+            json_match = re.search(r'\{[\s\S]*\}', response)
+            if json_match:
+                return json.loads(json_match.group())
+            
+        except Exception as e:
+            logger.error(f"LLM analysis failed: {e}")
+        
+        return {
+            "contradiction_score": 0,
+            "contradiction_type": "NONE",
+            "explanation": "Analiz yapılamadı",
+            "key_conflict_points": [],
+        }
     
     def detect(
         self,
         new_statement: str,
         speaker: str = "",
         filter_by_speaker: bool = True,
+        index_statement: bool = True,
     ) -> ContradictionResult:
         """
         Detect contradictions for a new statement.
         
+        Process:
+        1. Extract entities from new statement
+        2. Query knowledge graph for evidence pairs
+        3. Fall back to vector search if no graph matches
+        4. Send to LLM for analysis
+        5. Return structured result
+        
         Args:
-            new_statement: The new political statement to analyze
-            speaker: Speaker of the new statement
-            filter_by_speaker: Whether to filter historical search by speaker
+            new_statement: The new statement to analyze
+            speaker: Speaker name
+            filter_by_speaker: Filter evidence by speaker
+            index_statement: Add statement to knowledge graph
             
         Returns:
-            ContradictionResult with full analysis
+            ContradictionResult with evidence and score
         """
         if not new_statement or not new_statement.strip():
             return ContradictionResult(
                 new_statement=new_statement,
-                explanation="Empty statement provided",
+                explanation="Boş açıklama",
             )
         
-        # Resolve speaker name using fuzzy matching
-        resolved_speaker = speaker
-        if speaker:
-            resolved_speaker, match_score = self._resolve_speaker_name(speaker)
-            if resolved_speaker != speaker:
-                logger.info(
-                    f"Using resolved speaker name: '{resolved_speaker}' "
-                    f"(original: '{speaker}', score: {match_score})"
+        # Resolve speaker
+        resolved_speaker = self._resolve_speaker(speaker) if speaker else ""
+        
+        logger.info(f"Analyzing: \"{new_statement[:50]}...\" by {resolved_speaker}")
+        
+        # Step 1: Extract entities
+        extraction = self.extractor.extract(new_statement)
+        topics = extraction.topics
+        
+        logger.debug(f"Extracted topics: {topics}")
+        
+        # Step 2: Try knowledge graph first
+        evidence_1 = None
+        evidence_2 = None
+        
+        if resolved_speaker and topics:
+            pair = self._get_evidence_from_graph(resolved_speaker, topics)
+            
+            if pair:
+                evidence_1 = Evidence(
+                    text=pair.evidence_1.text,
+                    date=pair.evidence_1.date,
+                    source=pair.evidence_1.source,
+                    source_type=pair.evidence_1.source_type,
+                    topics=pair.evidence_1.topics,
                 )
+                logger.info(f"Found evidence pair from graph (delta: {pair.time_delta_days} days)")
         
-        logger.info(f"Analyzing statement: \"{new_statement[:50]}...\" by {resolved_speaker}")
+        # Step 3: Fall back to vector search
+        historical_matches = []
+        if evidence_1 is None:
+            speaker_filter = resolved_speaker if filter_by_speaker and resolved_speaker else None
+            historical_matches = self._get_evidence_from_vector(new_statement, speaker_filter)
+            
+            if historical_matches:
+                match = historical_matches[0]
+                evidence_1 = Evidence(
+                    text=match["text"],
+                    date=match.get("date", ""),
+                    source=match.get("source", ""),
+                    source_type=match.get("source_type", ""),
+                )
+                logger.info("Using vector search for evidence")
         
-        # Step 1: Retrieve historical matches (using resolved name)
-        speaker_filter = resolved_speaker if filter_by_speaker and resolved_speaker else None
-        historical_matches = self._retrieve(new_statement, speaker_filter)
-        
-        if not historical_matches:
-            logger.info("No historical matches found")
+        if evidence_1 is None:
+            logger.info("No historical evidence found")
             return ContradictionResult(
                 new_statement=new_statement,
                 speaker=resolved_speaker,
                 explanation="Geçmiş kayıtlarda benzer bir açıklama bulunamadı.",
             )
         
-        logger.info(f"Found {len(historical_matches)} historical matches")
+        # Evidence 2 is the new statement
+        evidence_2 = Evidence(
+            text=new_statement,
+            date=datetime.now().strftime("%Y-%m-%d"),
+            topics=topics,
+        )
         
-        # Step 2: LLM Verification
-        try:
-            analysis = self._verify(new_statement, historical_matches, resolved_speaker)
-        except Exception as e:
-            logger.error(f"LLM verification failed: {e}")
-            return ContradictionResult(
-                new_statement=new_statement,
-                speaker=resolved_speaker,
-                historical_matches=historical_matches,
-                explanation=f"Analiz hatası: {str(e)}",
-            )
+        # Step 4: LLM Analysis
+        analysis = self._analyze_with_llm(
+            new_statement=new_statement,
+            evidence_1=evidence_1.to_dict(),
+            evidence_2=evidence_2.to_dict(),
+            speaker=resolved_speaker,
+        )
         
-        # Step 3: Build result
-        score = analysis.get("contradiction_score", 0)
+        # Parse score (ensure 0-10 scale)
+        score = min(10, max(0, int(analysis.get("contradiction_score", 0))))
+        
+        # Parse type
         type_str = analysis.get("contradiction_type", "NONE")
-        
         try:
             contradiction_type = ContradictionType(type_str)
         except ValueError:
             contradiction_type = ContradictionType.NONE
         
+        # Step 5: Index new statement
+        if index_statement and resolved_speaker:
+            self._extract_and_index(
+                text=new_statement,
+                speaker=resolved_speaker,
+                date=datetime.now().strftime("%Y-%m-%d"),
+                source="live_analysis",
+                source_type="LIVE",
+            )
+        
+        # Build result
         result = ContradictionResult(
             new_statement=new_statement,
-            speaker=resolved_speaker,  # Use resolved name
-            historical_matches=historical_matches,
+            speaker=resolved_speaker,
+            evidence_1=evidence_1,
+            evidence_2=evidence_2,
             contradiction_score=score,
             contradiction_type=contradiction_type,
             explanation=analysis.get("explanation", ""),
             key_conflict_points=analysis.get("key_conflict_points", []),
             is_contradiction=score >= self.contradiction_threshold,
+            historical_matches=historical_matches,  # Legacy
         )
         
-        logger.info(f"Analysis complete: score={score}, is_contradiction={result.is_contradiction}")
+        logger.info(
+            f"Analysis complete: score={score}/10, "
+            f"is_contradiction={result.is_contradiction}"
+        )
         
         return result
     
@@ -344,23 +469,71 @@ class ContradictionDetector:
         self,
         statements: list[dict],
     ) -> list[ContradictionResult]:
-        """
-        Analyze multiple statements.
-        
-        Args:
-            statements: List of dicts with 'text' and optional 'speaker' keys
-            
-        Returns:
-            List of ContradictionResult objects
-        """
+        """Analyze multiple statements."""
         results = []
         
         for i, stmt in enumerate(statements):
             text = stmt.get("text", "")
             speaker = stmt.get("speaker", "")
             
-            logger.info(f"Processing statement {i+1}/{len(statements)}")
+            logger.info(f"Processing {i+1}/{len(statements)}")
             result = self.detect(text, speaker)
             results.append(result)
         
         return results
+    
+    def index_historical_data(
+        self,
+        limit: int = 10000,
+    ) -> int:
+        """
+        Index existing data from vector store into knowledge graph.
+        
+        Call this once to populate the graph with historical data.
+        
+        Returns:
+            Number of statements indexed
+        """
+        logger.info("Indexing historical data to knowledge graph...")
+        
+        # Get all unique speakers
+        speakers = self.memory.get_unique_speakers()
+        indexed = 0
+        
+        for speaker in list(speakers)[:100]:  # Limit speakers
+            # Get statements for this speaker
+            matches = self.memory.search(
+                query_text="",
+                top_k=100,
+                speaker_filter=speaker,
+            )
+            
+            for match in matches:
+                if indexed >= limit:
+                    break
+                
+                # Extract and index
+                self._extract_and_index(
+                    text=match.text,
+                    speaker=match.speaker,
+                    date=match.date,
+                    source=match.source,
+                    source_type=match.source_type,
+                )
+                indexed += 1
+        
+        logger.info(f"Indexed {indexed} statements to knowledge graph")
+        return indexed
+    
+    # Legacy compatibility
+    @property
+    def top_k(self) -> int:
+        return 5
+    
+    @top_k.setter
+    def top_k(self, value: int):
+        pass  # Ignored in new implementation
+    
+    def clear_speaker_cache(self) -> None:
+        """Clear speaker name cache."""
+        self._speaker_cache = None
