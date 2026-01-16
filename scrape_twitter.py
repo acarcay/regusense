@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
 
-import requests
+import httpx
 from bs4 import BeautifulSoup
 
 logging.basicConfig(
@@ -284,10 +284,13 @@ class NitterScraper:
     
     def __init__(self, rate_limit: float = 2.0):
         self.rate_limit = rate_limit
-        self.session = requests.Session()
-        self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari/537.36",
-        })
+        self.session = httpx.Client(
+            timeout=30.0,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari/537.36",
+            },
+            follow_redirects=True,
+        )
         self._working_instance = None
     
     def _find_working_instance(self) -> Optional[str]:
@@ -333,11 +336,11 @@ class NitterScraper:
                 url += f"?cursor={cursor}"
             
             try:
-                response = self.session.get(url, timeout=30)
+                response = self.session.get(url)
                 if response.status_code != 200:
                     logger.warning(f"Failed to fetch: {url}")
                     break
-            except requests.RequestException as e:
+            except httpx.HTTPError as e:
                 logger.error(f"Request failed: {e}")
                 break
             

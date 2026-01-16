@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urljoin
 
-import requests
+import httpx
 from bs4 import BeautifulSoup
 
 logging.basicConfig(
@@ -66,12 +66,15 @@ class GenelKurulScraper:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.rate_limit = rate_limit
-        self.session = requests.Session()
-        self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "tr-TR,tr;q=0.9,en;q=0.8",
-        })
+        self.session = httpx.Client(
+            timeout=30.0,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "tr-TR,tr;q=0.9,en;q=0.8",
+            },
+            follow_redirects=True,
+        )
     
     def get_session_list(self, donem: int, yasama_yili: int) -> list[TutanakInfo]:
         """
@@ -88,9 +91,9 @@ class GenelKurulScraper:
         logger.info(f"Fetching session list: Dönem {donem}, Yasama Yılı {yasama_yili}")
         
         try:
-            response = self.session.get(url, timeout=30)
+            response = self.session.get(url)
             response.raise_for_status()
-        except requests.RequestException as e:
+        except httpx.HTTPError as e:
             logger.error(f"Failed to fetch session list: {e}")
             return []
         
@@ -170,9 +173,9 @@ class GenelKurulScraper:
             PDF URL or None if not found
         """
         try:
-            response = self.session.get(detail_url, timeout=30)
+            response = self.session.get(detail_url)
             response.raise_for_status()
-        except requests.RequestException as e:
+        except httpx.HTTPError as e:
             logger.error(f"Failed to fetch detail page: {e}")
             return None
         
@@ -241,7 +244,7 @@ class GenelKurulScraper:
             return filepath
         
         try:
-            response = self.session.get(tutanak.pdf_url, timeout=120)
+            response = self.session.get(tutanak.pdf_url, timeout=httpx.Timeout(120.0))
             response.raise_for_status()
             
             # Verify it's actually a PDF
@@ -257,7 +260,7 @@ class GenelKurulScraper:
             logger.info(f"Downloaded: {filename} ({size_kb} KB)")
             return filepath
             
-        except requests.RequestException as e:
+        except httpx.HTTPError as e:
             logger.error(f"Download failed: {tutanak.pdf_url} - {e}")
             return None
     
