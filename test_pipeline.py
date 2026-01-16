@@ -17,6 +17,9 @@ import logging
 import sys
 from datetime import datetime
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from scrapers.twitter_scraper import TwitterScraper
 from scrapers.video_processor import VideoProcessor
 from intelligence.contradiction_engine import ContradictionDetector
