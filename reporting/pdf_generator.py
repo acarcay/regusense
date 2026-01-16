@@ -558,6 +558,214 @@ class ReportGenerator:
         # Sort by modification time
         latest = max(json_files, key=lambda p: p.stat().st_mtime)
         return str(latest)
+    
+    # =========================================================================
+    # Political Insight Card Generation (ReguSense-Politics)
+    # =========================================================================
+    
+    def generate_insight_card(self, contradiction_result: dict) -> str:
+        """
+        Generate a Political Insight Card PDF from a contradiction result.
+        
+        Creates a visually striking single-page or multi-page report with:
+        - New Statement highlighted in RED
+        - Historical Statement(s) in GREY
+        - Prominent Contradiction Score badge
+        - Explanation and conflict points
+        
+        Args:
+            contradiction_result: Dictionary from ContradictionResult.to_dict()
+            
+        Returns:
+            Path to the generated PDF file
+        """
+        self._init_pdf()
+        self.pdf.add_page()
+        
+        score = contradiction_result.get("contradiction_score", 0)
+        is_contradiction = contradiction_result.get("is_contradiction", False)
+        new_stmt = contradiction_result.get("new_statement", "")
+        speaker = contradiction_result.get("speaker", "Bilinmiyor")
+        explanation = contradiction_result.get("explanation", "")
+        conflict_points = contradiction_result.get("key_conflict_points", [])
+        historical = contradiction_result.get("historical_matches", [])
+        contradiction_type = contradiction_result.get("contradiction_type", "NONE")
+        
+        # === Header with gradient ===
+        header_color = Colors.HIGH if is_contradiction else Colors.ACCENT
+        self._set_fill_color(header_color)
+        self.pdf.rect(0, 0, self.PAGE_WIDTH, 60, "F")
+        
+        # Title
+        self._set_text_color(Colors.TEXT_WHITE)
+        self._set_font("B", 28)
+        self.pdf.set_xy(self.MARGIN, 12)
+        self.pdf.cell(self.CONTENT_WIDTH - 50, 12, "ReguSense Politics", align="L")
+        
+        # Score Badge (circular appearance with large number)
+        badge_x = self.PAGE_WIDTH - 55
+        badge_y = 10
+        badge_size = 40
+        
+        # Draw score badge circle
+        self._set_fill_color(Colors.TEXT_WHITE)
+        self.pdf.ellipse(badge_x, badge_y, badge_size, badge_size, "F")
+        
+        # Score number
+        score_color = Colors.HIGH if score >= 70 else (Colors.MEDIUM if score >= 40 else Colors.ACCENT)
+        self._set_text_color(score_color)
+        self._set_font("B", 20)
+        self.pdf.set_xy(badge_x, badge_y + 8)
+        self.pdf.cell(badge_size, 10, str(score), align="C")
+        
+        # "Skor" label
+        self._set_font("", 8)
+        self.pdf.set_xy(badge_x, badge_y + 22)
+        self.pdf.cell(badge_size, 6, "SKOR", align="C")
+        
+        # Subtitle with type
+        self._set_text_color(Colors.TEXT_WHITE)
+        self._set_font("", 12)
+        self.pdf.set_xy(self.MARGIN, 30)
+        status_text = "⚠️ ÇELİŞKİ TESPİT EDİLDİ" if is_contradiction else "✓ TUTARLI"
+        self.pdf.cell(self.CONTENT_WIDTH - 50, 8, f"{status_text} | {contradiction_type}", align="L")
+        
+        # Speaker
+        self._set_font("", 10)
+        self.pdf.set_xy(self.MARGIN, 42)
+        self.pdf.cell(self.CONTENT_WIDTH - 50, 6, f"Konuşmacı: {speaker}", align="L")
+        
+        y = 70
+        
+        # === NEW STATEMENT (RED HIGHLIGHT) ===
+        self._set_fill_color(Colors.HIGH)
+        self.pdf.rect(self.MARGIN, y, self.CONTENT_WIDTH, 8, "F")
+        
+        self._set_text_color(Colors.TEXT_WHITE)
+        self._set_font("B", 10)
+        self.pdf.set_xy(self.MARGIN + 5, y + 1)
+        self.pdf.cell(self.CONTENT_WIDTH - 10, 6, "YENİ AÇIKLAMA", align="L")
+        y += 10
+        
+        # Statement text
+        self._set_fill_color((254, 226, 226))  # Light red background
+        self._set_text_color(Colors.HIGH)
+        self._set_font("B", 11)
+        self.pdf.set_xy(self.MARGIN, y)
+        
+        # Calculate height needed
+        stmt_lines = self.pdf.multi_cell(
+            self.CONTENT_WIDTH - 10, 6, f'"{new_stmt}"',
+            align="L", dry_run=True, output="LINES"
+        )
+        stmt_height = len(stmt_lines) * 6 + 10
+        
+        self.pdf.rect(self.MARGIN, y, self.CONTENT_WIDTH, stmt_height, "F")
+        self.pdf.set_xy(self.MARGIN + 5, y + 5)
+        self.pdf.multi_cell(self.CONTENT_WIDTH - 10, 6, f'"{new_stmt}"', align="L")
+        y = self.pdf.get_y() + 10
+        
+        # === HISTORICAL STATEMENTS (GREY) ===
+        if historical:
+            self._set_fill_color(Colors.NOISE)
+            self.pdf.rect(self.MARGIN, y, self.CONTENT_WIDTH, 8, "F")
+            
+            self._set_text_color(Colors.TEXT_WHITE)
+            self._set_font("B", 10)
+            self.pdf.set_xy(self.MARGIN + 5, y + 1)
+            self.pdf.cell(self.CONTENT_WIDTH - 10, 6, "GEÇMİŞ AÇIKLAMALAR", align="L")
+            y += 12
+            
+            for i, hist in enumerate(historical[:3]):  # Max 3 historical statements
+                hist_text = hist.get("text", "")
+                hist_date = hist.get("date", "")
+                hist_similarity = hist.get("similarity", 0)
+                
+                # Check if we need a new page
+                if y > self.PAGE_HEIGHT - 80:
+                    self.pdf.add_page()
+                    y = 20
+                
+                # Statement box
+                self._set_fill_color(Colors.BG_SNIPPET)
+                
+                # Calculate height
+                self._set_font("", 10)
+                hist_lines = self.pdf.multi_cell(
+                    self.CONTENT_WIDTH - 20, 5, f'"{hist_text}"',
+                    align="L", dry_run=True, output="LINES"
+                )
+                hist_height = len(hist_lines) * 5 + 15
+                
+                self.pdf.rect(self.MARGIN, y, self.CONTENT_WIDTH, hist_height, "F")
+                
+                # Date and similarity
+                self._set_text_color(Colors.TEXT_LIGHT)
+                self._set_font("", 8)
+                self.pdf.set_xy(self.MARGIN + 5, y + 2)
+                self.pdf.cell(self.CONTENT_WIDTH / 2, 4, f"📅 {hist_date}", align="L")
+                self.pdf.set_xy(self.MARGIN + self.CONTENT_WIDTH / 2, y + 2)
+                self.pdf.cell(self.CONTENT_WIDTH / 2 - 10, 4, f"Benzerlik: {hist_similarity:.0%}", align="R")
+                
+                # Statement
+                self._set_text_color(Colors.TEXT_DARK)
+                self._set_font("", 10)
+                self.pdf.set_xy(self.MARGIN + 5, y + 8)
+                self.pdf.multi_cell(self.CONTENT_WIDTH - 10, 5, f'"{hist_text}"', align="L")
+                
+                y = self.pdf.get_y() + 8
+        
+        # === EXPLANATION ===
+        if explanation:
+            if y > self.PAGE_HEIGHT - 60:
+                self.pdf.add_page()
+                y = 20
+            
+            self._set_fill_color(Colors.PRIMARY)
+            self.pdf.rect(self.MARGIN, y, self.CONTENT_WIDTH, 8, "F")
+            
+            self._set_text_color(Colors.TEXT_WHITE)
+            self._set_font("B", 10)
+            self.pdf.set_xy(self.MARGIN + 5, y + 1)
+            self.pdf.cell(self.CONTENT_WIDTH - 10, 6, "ANALİZ", align="L")
+            y += 10
+            
+            self._set_text_color(Colors.TEXT_DARK)
+            self._set_font("", 10)
+            self.pdf.set_xy(self.MARGIN + 5, y)
+            self.pdf.multi_cell(self.CONTENT_WIDTH - 10, 5, explanation, align="L")
+            y = self.pdf.get_y() + 5
+        
+        # === CONFLICT POINTS ===
+        if conflict_points:
+            self._set_text_color(Colors.HIGH)
+            self._set_font("B", 9)
+            self.pdf.set_xy(self.MARGIN + 5, y)
+            self.pdf.cell(100, 5, "Çelişki Noktaları:", align="L")
+            y += 6
+            
+            self._set_font("", 9)
+            for point in conflict_points[:5]:  # Max 5 points
+                self.pdf.set_xy(self.MARGIN + 10, y)
+                self.pdf.cell(self.CONTENT_WIDTH - 15, 5, f"• {point}", align="L")
+                y += 5
+        
+        # === Footer ===
+        self._set_text_color(Colors.TEXT_LIGHT)
+        self._set_font("", 8)
+        self.pdf.set_xy(self.MARGIN, self.PAGE_HEIGHT - 15)
+        timestamp = datetime.now().strftime("%d.%m.%Y %H:%M")
+        self.pdf.cell(self.CONTENT_WIDTH, 5, f"ReguSense Politics | {timestamp}", align="C")
+        
+        # Generate output filename
+        timestamp_file = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_path = self.output_dir / f"political_insight_{timestamp_file}.pdf"
+        
+        # Save PDF
+        self.pdf.output(str(output_path))
+        logger.info(f"Political insight card generated: {output_path}")
+        
+        return str(output_path)
 
 
 def generate_report(

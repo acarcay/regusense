@@ -59,37 +59,82 @@ settings: Final[Settings] = Settings()
 
 
 # =============================================================================
-# Commission Sources Dictionary
+# Commission Sources Dictionary - ALL 18 TBMM Specialty Commissions
 # =============================================================================
 # Maps internal Commission Keys to specific TBMM Commission Transcript Page URLs.
-# Each commission monitors different sectors and risk types.
 
 COMMISSION_SOURCES: Final[dict[str, dict[str, str]]] = {
-    # Main source for Taxes & Fines (Crucial for All Sectors)
+    # =========================================================================
+    # PRIMARY COMMISSIONS (Most Relevant for Political Analysis)
+    # =========================================================================
+    
     "PLAN_BUTCE": {
         "name": "Plan ve Bütçe Komisyonu",
         "url": (
             "https://www.tbmm.gov.tr/ihtisas-komisyonlari/KomisyonTutanaklari/"
             "plan-ve-butce-komisyonu/f72877d1-b469-037b-e050-007f01005610"
         ),
-        "sectors": ["CRYPTO", "FINTECH", "ENERGY", "AUTOMOTIVE", "ECOMMERCE"],
+        "sectors": ["ECONOMY", "FINANCE", "BUDGET", "TAX"],
         "focus": "Vergi düzenlemeleri, bütçe tahsisatları, mali yaptırımlar",
     },
     
-    # Source for Energy & E-Commerce Regulations
-    "SANAYI_ENERJI": {
-        "name": "Sanayi, Ticaret, Enerji Komisyonu",
+    "ADALET": {
+        "name": "Adalet Komisyonu",
         "url": (
-            "https://www.tbmm.gov.tr/ihtisas-komisyonlari/Icerik/"
-            "ihtisas-komisyonlari-sanayi-ticaret-enerji-tabii-kaynaklar-bilgi-ve-teknoloji-komisyonu-hakkinda/"
+            "https://www.tbmm.gov.tr/ihtisas-komisyonlari/KomisyonTutanaklari/"
+            "adalet-komisyonu/f72877d1-b46b-037b-e050-007f01005610"
+        ),
+        "sectors": ["LAW", "JUSTICE", "CRIMINAL"],
+        "focus": "Ceza hukuku, yargı düzenlemeleri, hukuk reformları",
+    },
+    
+    "ANAYASA": {
+        "name": "Anayasa Komisyonu",
+        "url": (
+            "https://www.tbmm.gov.tr/ihtisas-komisyonlari/KomisyonTutanaklari/"
+            "anayasa-komisyonu/f72877d1-b46c-037b-e050-007f01005610"
+        ),
+        "sectors": ["CONSTITUTION", "RIGHTS", "GOVERNANCE"],
+        "focus": "Anayasa değişiklikleri, temel haklar, yönetim yapısı",
+    },
+    
+    "SANAYI_ENERJI": {
+        "name": "Sanayi, Ticaret, Enerji, Tabii Kaynaklar, Bilgi ve Teknoloji Komisyonu",
+        "url": (
+            "https://www.tbmm.gov.tr/ihtisas-komisyonlari/KomisyonTutanaklari/"
             "sanayi-ticaret-enerji-tabii-kaynaklar-bilgi-ve-teknoloji-komisyonu/"
             "f72877d1-b474-037b-e050-007f01005610"
         ),
-        "sectors": ["ENERGY", "ECOMMERCE", "FINTECH"],
-        "focus": "Enerji düzenlemeleri, e-ticaret mevzuatı, teknoloji politikaları",
+        "sectors": ["ENERGY", "TECH", "INDUSTRY", "COMMERCE"],
+        "focus": "Enerji politikaları, sanayi düzenlemeleri, teknoloji",
     },
     
-    # Source for Automotive & Logistics
+    "SAGLIK": {
+        "name": "Sağlık, Aile, Çalışma ve Sosyal İşler Komisyonu",
+        "url": (
+            "https://www.tbmm.gov.tr/ihtisas-komisyonlari/KomisyonTutanaklari/"
+            "saglik-aile-calisma-ve-sosyal-isler-komisyonu/"
+            "f72877d1-b475-037b-e050-007f01005610"
+        ),
+        "sectors": ["HEALTH", "SOCIAL", "LABOR", "FAMILY"],
+        "focus": "Sağlık politikaları, iş hukuku, sosyal güvenlik",
+    },
+    
+    "EGITIM": {
+        "name": "Milli Eğitim, Kültür, Gençlik ve Spor Komisyonu",
+        "url": (
+            "https://www.tbmm.gov.tr/ihtisas-komisyonlari/KomisyonTutanaklari/"
+            "milli-egitim-kultur-genclik-ve-spor-komisyonu/"
+            "f72877d1-b472-037b-e050-007f01005610"
+        ),
+        "sectors": ["EDUCATION", "CULTURE", "YOUTH", "SPORTS"],
+        "focus": "Eğitim politikaları, kültür, gençlik",
+    },
+    
+    # =========================================================================
+    # SECONDARY COMMISSIONS
+    # =========================================================================
+    
     "BAYINDIRLIK": {
         "name": "Bayındırlık, İmar, Ulaştırma ve Turizm Komisyonu",
         "url": (
@@ -97,30 +142,128 @@ COMMISSION_SOURCES: Final[dict[str, dict[str, str]]] = {
             "bayindirlik-imar-ulastirma-ve-turizm-komisyonu/"
             "f72877d1-b46a-037b-e050-007f01005610"
         ),
-        "sectors": ["AUTOMOTIVE", "CONSTRUCTION", "LOGISTICS"],
-        "focus": "Ulaştırma düzenlemeleri, otomotiv standartları, lojistik mevzuatı",
+        "sectors": ["TRANSPORT", "CONSTRUCTION", "TOURISM"],
+        "focus": "Ulaştırma, imar, turizm düzenlemeleri",
     },
     
-    # Source for Digital Assets & Social Media Law
     "DIJITAL_MECRALAR": {
         "name": "Dijital Mecralar Komisyonu",
         "url": (
             "https://www.tbmm.gov.tr/ihtisas-komisyonlari/KomisyonTutanaklari/"
             "dijital-mecralar-komisyonu/f72877d1-b4c7-037b-e050-007f01005610"
         ),
-        "sectors": ["CRYPTO", "FINTECH", "ECOMMERCE"],
-        "focus": "Dijital varlık düzenlemeleri, sosyal medya yasaları, veri koruma",
+        "sectors": ["DIGITAL", "SOCIAL_MEDIA", "INTERNET"],
+        "focus": "Dijital platformlar, sosyal medya, internet düzenlemeleri",
     },
     
-    # Source for Penal Codes (Crypto Assets)
-    "ADALET": {
-        "name": "Adalet Komisyonu",
+    "ICISLERI": {
+        "name": "İçişleri Komisyonu",
         "url": (
             "https://www.tbmm.gov.tr/ihtisas-komisyonlari/KomisyonTutanaklari/"
-            "adalet-komisyonu/f72877d1-b46b-037b-e050-007f01005610"
+            "icisleri-komisyonu/f72877d1-b46f-037b-e050-007f01005610"
         ),
-        "sectors": ["CRYPTO", "FINTECH"],
-        "focus": "Ceza hukuku, kripto varlık suçları, dolandırıcılık mevzuatı",
+        "sectors": ["SECURITY", "LOCAL_GOV", "CITIZENSHIP"],
+        "focus": "İç güvenlik, yerel yönetimler, vatandaşlık",
+    },
+    
+    "DISISLERI": {
+        "name": "Dışişleri Komisyonu",
+        "url": (
+            "https://www.tbmm.gov.tr/ihtisas-komisyonlari/KomisyonTutanaklari/"
+            "disisleri-komisyonu/f72877d1-b468-037b-e050-007f01005610"
+        ),
+        "sectors": ["FOREIGN_POLICY", "DIPLOMACY", "TREATIES"],
+        "focus": "Dış politika, uluslararası anlaşmalar",
+    },
+    
+    "CEVRE": {
+        "name": "Çevre Komisyonu",
+        "url": (
+            "https://www.tbmm.gov.tr/ihtisas-komisyonlari/KomisyonTutanaklari/"
+            "cevre-komisyonu/f72877d1-b46d-037b-e050-007f01005610"
+        ),
+        "sectors": ["ENVIRONMENT", "CLIMATE", "SUSTAINABILITY"],
+        "focus": "Çevre politikaları, iklim, sürdürülebilirlik",
+    },
+    
+    "TARIM": {
+        "name": "Tarım, Orman ve Köyişleri Komisyonu",
+        "url": (
+            "https://www.tbmm.gov.tr/ihtisas-komisyonlari/KomisyonTutanaklari/"
+            "tarim-orman-ve-koyisleri-komisyonu/f72877d1-b476-037b-e050-007f01005610"
+        ),
+        "sectors": ["AGRICULTURE", "FORESTRY", "RURAL"],
+        "focus": "Tarım politikaları, orman, köy kalkınması",
+    },
+    
+    "SAVUNMA": {
+        "name": "Milli Savunma Komisyonu",
+        "url": (
+            "https://www.tbmm.gov.tr/ihtisas-komisyonlari/KomisyonTutanaklari/"
+            "milli-savunma-komisyonu/f72877d1-b477-037b-e050-007f01005610"
+        ),
+        "sectors": ["DEFENSE", "MILITARY", "SECURITY"],
+        "focus": "Savunma politikaları, askeri düzenlemeler",
+    },
+    
+    "AB_UYUM": {
+        "name": "Avrupa Birliği Uyum Komisyonu",
+        "url": (
+            "https://www.tbmm.gov.tr/ihtisas-komisyonlari/KomisyonTutanaklari/"
+            "avrupa-birligi-uyum-komisyonu/f72877d1-b47a-037b-e050-007f01005610"
+        ),
+        "sectors": ["EU", "HARMONIZATION", "INTERNATIONAL"],
+        "focus": "AB mevzuatı uyumu, uluslararası standartlar",
+    },
+    
+    "INSAN_HAKLARI": {
+        "name": "İnsan Haklarını İnceleme Komisyonu",
+        "url": (
+            "https://www.tbmm.gov.tr/ihtisas-komisyonlari/KomisyonTutanaklari/"
+            "insan-haklarini-inceleme-komisyonu/f72877d1-b470-037b-e050-007f01005610"
+        ),
+        "sectors": ["HUMAN_RIGHTS", "CIVIL_LIBERTIES"],
+        "focus": "İnsan hakları, sivil özgürlükler",
+    },
+    
+    "KADIN_ERKEK": {
+        "name": "Kadın Erkek Fırsat Eşitliği Komisyonu",
+        "url": (
+            "https://www.tbmm.gov.tr/ihtisas-komisyonlari/KomisyonTutanaklari/"
+            "kadin-erkek-firsat-esitligi-komisyonu/f72877d1-b499-037b-e050-007f01005610"
+        ),
+        "sectors": ["GENDER", "EQUALITY", "WOMEN"],
+        "focus": "Cinsiyet eşitliği, kadın hakları",
+    },
+    
+    "KIT": {
+        "name": "Kamu İktisadi Teşebbüsleri Komisyonu",
+        "url": (
+            "https://www.tbmm.gov.tr/ihtisas-komisyonlari/KomisyonTutanaklari/"
+            "kamu-iktisadi-tesebbusleri-komisyonu/f72877d1-b471-037b-e050-007f01005610"
+        ),
+        "sectors": ["STATE_ENTERPRISES", "PUBLIC_SECTOR"],
+        "focus": "Kamu işletmeleri, devlet teşebbüsleri",
+    },
+    
+    "DILEKCE": {
+        "name": "Dilekçe Komisyonu",
+        "url": (
+            "https://www.tbmm.gov.tr/ihtisas-komisyonlari/KomisyonTutanaklari/"
+            "dilekce-komisyonu/f72877d1-b46e-037b-e050-007f01005610"
+        ),
+        "sectors": ["PETITIONS", "CITIZENS"],
+        "focus": "Vatandaş dilekçeleri, şikayetler",
+    },
+    
+    "GUVENLIK": {
+        "name": "Güvenlik ve İstihbarat Komisyonu",
+        "url": (
+            "https://www.tbmm.gov.tr/ihtisas-komisyonlari/KomisyonTutanaklari/"
+            "guvenlik-ve-istihbarat-komisyonu/f72877d1-b460-037b-e050-007f01005610"
+        ),
+        "sectors": ["INTELLIGENCE", "NATIONAL_SECURITY"],
+        "focus": "İstihbarat, ulusal güvenlik",
     },
 }
 

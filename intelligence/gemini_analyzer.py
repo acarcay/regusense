@@ -592,6 +592,154 @@ SADECE JSON nesnesiyle yanıt ver. Markdown veya ek açıklama ekleme."""
         )
         
         return report
+    
+    # =========================================================================
+    # Political Contradiction Analysis (ReguSense-Politics)
+    # =========================================================================
+    
+    POLITICAL_ANALYST_PROMPT = """Sen siyasi söylem analizi konusunda uzman bir siyaset analistisin.
+
+**GÖREV:** Aşağıdaki YENİ AÇIKLAMAYI, FARKLI PLATFORMLARDAN elde edilen GEÇMİŞ AÇIKLAMALARLA karşılaştır.
+Semantik çelişki, U-dönüşü veya tutarsızlık olup olmadığını tespit et.
+
+**ÖNEMLİ - PLATFORM FARKLILIĞI ANALİZİ:**
+Bu bir ÇOKLU KAYNAK analizidir. Geçmiş açıklamalar şu kaynaklardan gelebilir:
+- 🏛️ TBMM_COMMISSION: Resmi komisyon tutanakları (teknik, uzman dile yakın)
+- 🎤 TBMM_GENERAL_ASSEMBLY: Genel kurul konuşmaları (popülist, halkla iletişim odaklı)
+- 📱 SOCIAL_MEDIA: Twitter/X paylaşımları (kısa, vurucu, halkı hedefleyen)
+- 📺 TV_INTERVIEW: TV röportajları (detaylı, savunmacı veya açıklayıcı)
+
+**YÜKSEK DEĞERLİ ÇELIŞKI:** Resmi komisyon toplantısındaki teknik/uzman pozisyonu ile 
+Genel Kurul'daki popülist söylemi veya sosyal medyadaki halk söylemi arasındaki çelişkiler 
+EN DEĞERLİ bulgulardır. Bu "PERSONA DEĞİŞİMİ" paternlerini özellikle işaretle.
+
+**YENİ AÇIKLAMA (Statement A):**
+"{new_statement}"
+
+**KONUŞMACI:** {speaker}
+
+**GEÇMİŞ AÇIKLAMALAR (Statement B - Historical):**
+{historical_statements}
+
+**DEĞERLENDİRME KRİTERLERİ:**
+1. Zamansal bağlamı dikkate al (zaman geçtikçe görüşler değişebilir)
+2. Politika pozisyonlarında doğrudan tersine dönüşleri ara
+3. Halka verilen kırılan sözleri işaretle  
+4. Gelişen görüşler vs. açık çelişkileri ayırt et
+5. **PLATFORM/PERSONA FAR KI:** Resmi tutanak vs. sosyal medya tonu arasındaki çelişkiler
+
+**ÖNEMLİ KURALLAR:**
+- SADECE yukarıda sunulan metin parçalarını kullan.
+- Çelişki bulamazsan UYDURMA - "NONE" olarak işaretle.
+- Yanıtında her zaman geçmiş açıklamalardaki TARİHLERE ve KAYNAK TİPLERİNE (source_type) atıf yap.
+- Belirsiz veya bağlam dışı karşılaştırmalardan kaçın.
+- Platform farkı varsa "persona_shift" alanını true yap.
+
+**ÇELİŞKİ TÜRLERİ:**
+- REVERSAL: Önceki pozisyonun tam tersi
+- BROKEN_PROMISE: Yerine getirilmemiş vaat
+- INCONSISTENCY: Tutarsız ifadeler
+- PERSONA_SHIFT: Farklı platformlarda farklı söylem (KOMİSYON vs GENEL KURUL gibi)
+- NONE: Çelişki yok
+
+**JSON FORMATINDA YANIT VER:**
+{{
+    "contradiction_score": 0-100 arası puan,
+    "contradiction_type": "REVERSAL" | "BROKEN_PROMISE" | "INCONSISTENCY" | "PERSONA_SHIFT" | "NONE",
+    "persona_shift": true veya false (platform farkı varsa true),
+    "explanation": "Türkçe kısa açıklama (max 2 cümle)",
+    "key_conflict_points": ["çelişki noktası 1", "çelişki noktası 2"],
+    "source_comparison": "Hangi kaynaklar arasında çelişki var (örn: COMMISSION vs GENERAL_ASSEMBLY)"
+}}
+
+SADECE JSON döndür. Markdown veya ek açıklama ekleme."""
+
+    def analyze_contradiction(
+        self,
+        new_statement: str,
+        historical_statements: list[dict],
+        speaker: str = "",
+    ) -> dict:
+        """
+        Analyze a new statement for contradictions with historical statements.
+        
+        Used by ContradictionDetector for political analysis.
+        
+        Args:
+            new_statement: The new statement to analyze
+            historical_statements: List of historical statement dicts with keys:
+                - text: Statement text
+                - date: Date of statement
+                - similarity: Semantic similarity score
+            speaker: Name of the speaker
+            
+        Returns:
+            Dictionary with analysis results:
+                - contradiction_score: 0-100
+                - contradiction_type: REVERSAL/BROKEN_PROMISE/INCONSISTENCY/NONE
+                - explanation: Turkish explanation
+                - key_conflict_points: List of conflict points
+        """
+        # Format historical statements for the prompt
+        historical_text = ""
+        for i, stmt in enumerate(historical_statements, 1):
+            date = stmt.get("date", "Tarih bilinmiyor")
+            similarity = stmt.get("similarity", 0)
+            text = stmt.get("text", "")
+            historical_text += f"\n{i}. [{date}] (Benzerlik: {similarity:.2%})\n   \"{text}\"\n"
+        
+        if not historical_text:
+            return {
+                "contradiction_score": 0,
+                "contradiction_type": "NONE",
+                "explanation": "Karşılaştırılacak geçmiş açıklama bulunamadı.",
+                "key_conflict_points": [],
+            }
+        
+        prompt = self.POLITICAL_ANALYST_PROMPT.format(
+            new_statement=new_statement,
+            speaker=speaker or "Bilinmiyor",
+            historical_statements=historical_text,
+        )
+        
+        try:
+            response = self.model.generate_content(prompt)
+            
+            # Parse the JSON response
+            cleaned = response.text.strip()
+            if cleaned.startswith("```json"):
+                cleaned = cleaned[7:]
+            if cleaned.startswith("```"):
+                cleaned = cleaned[3:]
+            if cleaned.endswith("```"):
+                cleaned = cleaned[:-3]
+            cleaned = cleaned.strip()
+            
+            data = json.loads(cleaned)
+            
+            return {
+                "contradiction_score": int(data.get("contradiction_score", 0)),
+                "contradiction_type": data.get("contradiction_type", "NONE"),
+                "explanation": data.get("explanation", ""),
+                "key_conflict_points": data.get("key_conflict_points", []),
+            }
+            
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse contradiction response: {e}")
+            return {
+                "contradiction_score": 0,
+                "contradiction_type": "NONE",
+                "explanation": f"Analiz hatası: JSON parse error",
+                "key_conflict_points": [],
+            }
+        except Exception as e:
+            logger.error(f"Contradiction analysis failed: {e}")
+            return {
+                "contradiction_score": 0,
+                "contradiction_type": "NONE",
+                "explanation": f"Analiz hatası: {str(e)[:100]}",
+                "key_conflict_points": [],
+            }
 
 
 # Convenience function for quick analysis
