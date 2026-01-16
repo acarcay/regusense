@@ -181,10 +181,10 @@ def load_analyzer():
 
 @st.cache_data(ttl=3600)
 def get_speakers():
-    \"\"\"Get unique speakers from memory (cached for 1 hour).
+    """Get unique speakers from memory (cached for 1 hour).
     
     Note: Uses internal cache in vector_store, this just sorts the result.
-    \"\"\"
+    """
     memory = load_memory()
     return sorted(list(memory.get_unique_speakers()))
 
