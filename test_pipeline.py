@@ -93,11 +93,11 @@ async def run_pipeline(speaker_name: str, max_contradictions: int = 1):
         # 3. Content Generation
         logger.info("--- PHASE 3: Content Generation ---")
         
-        # Banner
-        banner_path = generate_social_banner(result.to_dict())
+        # Generate Async Banner
+        banner_path = await generate_social_banner(result.to_dict())
         logger.info(f"✅ Banner generated: {banner_path}")
         
-        # Video Script
+        # Generate Video Script (Sync)
         script, script_path = generate_video_script(result.to_dict())
         logger.info(f"✅ Video Script generated: {script_path}")
         

@@ -1,0 +1,40 @@
+{
+  "width": 1080,
+  "height": 1920,
+  "fps": 30,
+  "background": "#121218",
+  "scenes": [
+    {
+      "duration": 2.0,
+      "text": "⚠️ Mehmet Şimşek\nÇelişki Analizi",
+      "animation": "fade_in",
+      "position": "center",
+      "font_size": 60,
+      "color": "#ef4444"
+    },
+    {
+      "duration": 4.0,
+      "text": "ESKİ (2023-07-20):\n\n\"Faiz oranlarını yükseltmek zorundayız, başka çaremiz yok....\"",
+      "animation": "slide_left",
+      "position": "center",
+      "font_size": 40,
+      "color": "#cccccc"
+    },
+    {
+      "duration": 4.0,
+      "text": "YENİ (Bugün):\n\n\"Enflasyonu düşürmek için büyümeden taviz vermeyeceğiz....\"",
+      "animation": "zoom_in",
+      "position": "center",
+      "font_size": 40,
+      "color": "#ffffff"
+    },
+    {
+      "duration": 3.0,
+      "text": "Detaylar için:\n@regusense",
+      "animation": "fade_in",
+      "position": "center",
+      "font_size": 48,
+      "color": "#FFFFFF"
+    }
+  ]
+}

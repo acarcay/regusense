@@ -1,0 +1,24 @@
+{
+  "statements": {
+    "25a32127ea202203": {
+      "id": "25a32127ea202203",
+      "text": "Enflasyonu düşürmek için büyümeden taviz vermeyeceğiz.",
+      "speaker": "Mehmet Şimşek",
+      "date": "2026-01-16",
+      "source": "live_analysis",
+      "source_type": "LIVE",
+      "topics": [
+        "ENFLASYON"
+      ],
+      "entities": {
+        "persons": [],
+        "organizations": []
+      },
+      "created_at": "2026-01-16T14:41:01.559757"
+    }
+  },
+  "metadata": {
+    "count": 1,
+    "updated_at": "2026-01-16T14:41:01.559804"
+  }
+}

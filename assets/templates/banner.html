@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ReguSense Banner</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800&family=Poppins:wght@300;500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #6366f1;
+            --secondary: #8b5cf6;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+            --success: #10b981;
+            --dark-bg: #121218;
+            --card-bg: rgba(255, 255, 255, 0.05);
+            --border: rgba(255, 255, 255, 0.1);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            width: 1080px;
+            height: 1350px;
+            background-color: var(--dark-bg);
+            font-family: 'Poppins', sans-serif;
+            color: white;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            position: relative;
+        }
+
+        /* Dynamic Background Glow */
+        .bg-glow {
+            position: absolute;
+            width: 800px;
+            height: 800px;
+            border-radius: 50%;
+            filter: blur(120px);
+            opacity: 0.15;
+            z-index: 0;
+        }
+        .glow-1 { top: -200px; left: -200px; background: var(--primary); }
+        .glow-2 { bottom: -200px; right: -200px; background: var(--danger); }
+
+        /* Container */
+        .container {
+            z-index: 10;
+            width: 100%;
+            height: 100%;
+            padding: 80px;
+            display: flex;
+            flex-direction: column;
+            gap: 40px;
+        }
+
+        /* Header */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .logo-text {
+            font-family: 'Outfit', sans-serif;
+            font-weight: 800;
+            font-size: 42px;
+            letter-spacing: -1px;
+            background: linear-gradient(to right, var(--primary), var(--secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .tagline {
+            font-size: 18px;
+            color: #9ca3af;
+            font-weight: 300;
+        }
+
+        /* Main Content */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 60px;
+            justify-content: center;
+        }
+
+        /* Speaker Profile */
+        .speaker-profile {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+        }
+        .avatar-ring {
+            width: 220px;
+            height: 220px;
+            border-radius: 50%;
+            padding: 6px;
+            background: linear-gradient(135deg, var(--primary), var(--danger));
+            box-shadow: 0 0 50px rgba(99, 102, 241, 0.3);
+        }
+        .avatar {
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 6px solid var(--dark-bg);
+            background-color: #333;
+        }
+        .speaker-name {
+            font-family: 'Outfit', sans-serif;
+            font-size: 48px;
+            font-weight: 700;
+            text-align: center;
+        }
+        .speaker-role {
+            font-size: 24px;
+            color: #9ca3af;
+            text-align: center;
+        }
+
+        /* Score Display */
+        .score-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .score-box {
+            background: rgba(239, 68, 68, 0.1);
+            border: 2px solid var(--danger);
+            color: var(--danger);
+            padding: 10px 30px;
+            border-radius: 50px;
+            font-family: 'Outfit', sans-serif;
+            font-weight: 800;
+            font-size: 36px;
+            box-shadow: 0 0 30px rgba(239, 68, 68, 0.2);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .score-label {
+            font-size: 20px;
+            font-weight: 600;
+            opacity: 0.9;
+        }
+
+        /* Comparison Logic */
+        .comparison {
+            display: flex;
+            gap: 40px;
+            align-items: stretch;
+            height: 500px;
+        }
+        
+        .card {
+            flex: 1;
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 30px;
+            padding: 40px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+            backdrop-filter: blur(20px);
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+        .card.old {
+            border-top: 6px solid #9ca3af;
+        }
+        .card.new {
+            border-top: 6px solid var(--danger);
+        }
+
+        .card-label {
+            font-size: 18px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            margin-bottom: 30px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .old .card-label { color: #9ca3af; }
+        .new .card-label { color: var(--danger); }
+
+        .quote-icon {
+            font-family: 'Outfit', sans-serif;
+            font-size: 80px;
+            line-height: 1;
+            opacity: 0.2;
+            position: absolute;
+            top: 20px;
+            right: 30px;
+        }
+
+        .statement-text {
+            font-size: 28px;
+            line-height: 1.5;
+            font-weight: 500;
+            flex: 1;
+            display: flex;
+            align-items: center;
+        }
+
+        .meta {
+            margin-top: 20px;
+            font-size: 18px;
+            color: #6b7280;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            border-top: 1px solid rgba(255,255,255,0.05);
+            padding-top: 20px;
+        }
+
+        /* Footer */
+        footer {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 15px;
+            opacity: 0.7;
+        }
+        .footer-logo {
+            width: 30px;
+            height: 30px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border-radius: 8px;
+        }
+        .footer-text {
+            font-size: 20px;
+            font-weight: 500;
+        }
+
+        /* VS Badge */
+        .vs-badge {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            background: #121218;
+            border: 2px solid var(--border);
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: 'Outfit', sans-serif;
+            font-weight: 800;
+            font-size: 24px;
+            color: white;
+            z-index: 20;
+        }
+
+    </style>
+</head>
+<body>
+    <div class="bg-glow glow-1"></div>
+    <div class="bg-glow glow-2"></div>
+
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <div class="brand">
+                <div class="logo-text">REGUSENSE</div>
+            </div>
+            <div class="tagline">Yapay Zeka Destekli Siyasi Analiz</div>
+        </header>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            
+            <!-- Speaker Profile -->
+            <div class="speaker-profile">
+                <div class="avatar-ring">
+                    <img src="{photo_url}" alt="Speaker" class="avatar" onerror="this.src='https://ui-avatars.com/api/?name={speaker}&background=333&color=fff&size=512'">
+                </div>
+                <div>
+                    <div class="speaker-name">{speaker}</div>
+                    <div class="speaker-role">Siyasetçi</div>
+                </div>
+            </div>
+
+            <!-- Score -->
+            <div class="score-container">
+                <div class="score-box">
+                    <span>{contradiction_type}</span>
+                    <span style="opacity:0.3">|</span>
+                    <span>{score}/10</span>
+                </div>
+                <div style="color: #9ca3af; font-size: 18px;">Çelişki Skoru</div>
+            </div>
+
+            <!-- Comparison Cards -->
+            <div class="position-relative" style="position: relative;">
+                <div class="comparison">
+                    <!-- Old Statement -->
+                    <div class="card old">
+                        <div class="quote-icon">"</div>
+                        <div class="card-label">
+                            <span>📅 {date_1}</span>
+                        </div>
+                        <div class="statement-text">
+                            {text_1}
+                        </div>
+                        <div class="meta">
+                            <span>ESKİ SÖZ</span>
+                        </div>
+                    </div>
+
+                    <!-- New Statement -->
+                    <div class="card new">
+                        <div class="quote-icon">"</div>
+                        <div class="card-label">
+                            <span>📅 {date_2}</span>
+                        </div>
+                        <div class="statement-text">
+                            {text_2}
+                        </div>
+                        <div class="meta">
+                            <span style="color: var(--danger)">YENİ SÖZ</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- center badge -->
+                <div class="vs-badge">VS</div>
+            </div>
+
+        </div>
+
+        <!-- Footer -->
+        <footer>
+            <div class="footer-text">Detaylı analiz için: <b>@regusense</b></div>
+        </footer>
+    </div>
+</body>
+</html>

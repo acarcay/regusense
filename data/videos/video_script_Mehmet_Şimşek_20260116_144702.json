@@ -1,0 +1,72 @@
+{
+  "width": 1080,
+  "height": 1920,
+  "fps": 30,
+  "background": "#121218",
+  "scenes": [
+    {
+      "duration": 2.0,
+      "text": "Mehmet Şimşek",
+      "animation": "fade_in",
+      "position": "center",
+      "font_size": 56,
+      "color": "#FFFFFF"
+    },
+    {
+      "duration": 1.5,
+      "text": "Tarih: 2023-07-20",
+      "animation": "slide_left",
+      "position": "center",
+      "font_size": 32,
+      "color": "#9CA3AF"
+    },
+    {
+      "duration": 4.0,
+      "text": "\"Faiz oranlarını yükseltmek zorundayız, başka çaremiz yok.\"",
+      "animation": "fade_in",
+      "position": "center",
+      "font_size": 36,
+      "color": "#FFFFFF"
+    },
+    {
+      "duration": 1.5,
+      "text": "...",
+      "animation": "fade_in",
+      "position": "center",
+      "font_size": 48,
+      "color": "#6366F1"
+    },
+    {
+      "duration": 1.5,
+      "text": "Tarih: 2026-01-16",
+      "animation": "slide_left",
+      "position": "center",
+      "font_size": 32,
+      "color": "#9CA3AF"
+    },
+    {
+      "duration": 4.0,
+      "text": "\"Enflasyonu düşürmek için büyümeden taviz vermeyeceğiz.\"",
+      "animation": "fade_in",
+      "position": "center",
+      "font_size": 36,
+      "color": "#EF4444"
+    },
+    {
+      "duration": 3.0,
+      "text": "TUTARSIZLIK\n\nSkor: 8/10",
+      "animation": "zoom",
+      "position": "center",
+      "font_size": 48,
+      "color": "#EC4899"
+    },
+    {
+      "duration": 2.0,
+      "text": "@regusense",
+      "animation": "fade_in",
+      "position": "center",
+      "font_size": 32,
+      "color": "#6366F1"
+    }
+  ]
+}
