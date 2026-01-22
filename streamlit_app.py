@@ -32,6 +32,14 @@ from intelligence.gemini_analyzer import GeminiAnalyst
 from intelligence.contradiction_engine import ContradictionDetector
 from thefuzz import process as fuzz_process
 
+# LangGraph Agent imports
+try:
+    from agents.graph import create_graph, run_analysis
+    from agents.state import create_initial_state, Evidence
+    LANGGRAPH_AVAILABLE = True
+except ImportError:
+    LANGGRAPH_AVAILABLE = False
+
 # =========================================================================
 # Page Configuration
 # =========================================================================
@@ -323,7 +331,12 @@ def main():
     # Main Content - Tabbed Interface
     # =========================================================================
     
-    tab_manual, tab_live = st.tabs(["📝 Manuel Analiz", "🔴 LIVE MODE"])
+    tab_manual, tab_live, tab_agent, tab_hitl = st.tabs([
+        "📝 Manuel Analiz", 
+        "🔴 LIVE MODE", 
+        "🤖 Agent Pipeline",
+        "🔗 Bağ Onayları"
+    ])
     
     # =========================================================================
     # TAB 1: Manual Analysis (Original)
@@ -615,6 +628,425 @@ def main():
                 """
                 
                 st.markdown(alert_html, unsafe_allow_html=True)
+    
+    # =========================================================================
+    # TAB 3: Agent Pipeline (LangGraph)
+    # =========================================================================
+    
+    with tab_agent:
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #6c5ce7 0%, #a29bfe 100%); 
+                    padding: 1rem; border-radius: 8px; color: white; margin-bottom: 1rem;">
+            <h3 style="margin: 0;">🤖 LangGraph Agent Pipeline</h3>
+            <p style="margin: 0.5rem 0 0 0; opacity: 0.9;">
+                Multi-agent sistemi ile gelişmiş çelişki analizi. 
+                Watchdog → Archivist → Searcher → Analyst → Editor → Human Approval
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        if not LANGGRAPH_AVAILABLE:
+            st.error("❌ LangGraph modülü yüklenemedi. `pip install langgraph` ile yükleyin.")
+        else:
+            # Agent session state
+            if "agent_state" not in st.session_state:
+                st.session_state.agent_state = None
+                st.session_state.agent_running = False
+            
+            # Input section
+            agent_col1, agent_col2 = st.columns([2, 1])
+            
+            with agent_col1:
+                agent_statement = st.text_area(
+                    "📝 Analiz Edilecek Açıklama",
+                    height=100,
+                    placeholder="Politikacının açıklamasını buraya yapıştırın...",
+                    key="agent_statement",
+                )
+                
+                agent_speaker = st.text_input(
+                    "👤 Konuşmacı",
+                    placeholder="örn: Mehmet Şimşek",
+                    key="agent_speaker",
+                )
+            
+            with agent_col2:
+                st.markdown("**🔧 Agent Ayarları**")
+                
+                st.info("""
+                **Pipeline:**
+                1. 👮 Watchdog (Filter)
+                2. 🗄️ Archivist (DB Query)
+                3. 🕵️ Searcher (Web)
+                4. 🧠 Analyst (LLM)
+                5. ✍️ Editor (Format)
+                6. ✅ Human Approval
+                """)
+            
+            # Run button
+            run_agent_btn = st.button(
+                "🚀 Agent Pipeline'ı Çalıştır",
+                type="primary",
+                use_container_width=True,
+                disabled=not agent_statement.strip(),
+                key="run_agent_btn",
+            )
+            
+            if run_agent_btn and agent_statement.strip():
+                st.session_state.agent_running = True
+                
+                with st.spinner("🔄 Agent Pipeline çalışıyor..."):
+                    try:
+                        # Run the agent graph
+                        result = run_analysis(
+                            statement=agent_statement.strip(),
+                            speaker=agent_speaker.strip() if agent_speaker else "",
+                        )
+                        st.session_state.agent_state = result
+                        st.session_state.agent_running = False
+                        
+                    except Exception as e:
+                        st.error(f"❌ Agent hatası: {e}")
+                        st.session_state.agent_running = False
+            
+            # Display results
+            if st.session_state.agent_state:
+                state = st.session_state.agent_state
+                
+                st.divider()
+                
+                # Pipeline progress visualization
+                st.subheader("📊 Pipeline Durumu")
+                
+                nodes = ["Watchdog", "Archivist", "Searcher", "Analyst", "Editor", "Approval"]
+                node_icons = ["👮", "🗄️", "🕵️", "🧠", "✍️", "✅"]
+                
+                cols = st.columns(6)
+                for i, (node, icon) in enumerate(zip(nodes, node_icons)):
+                    with cols[i]:
+                        # Determine node status
+                        if node == "Watchdog":
+                            status = "✅" if state.get("is_newsworthy") is not None else "⏳"
+                            value = f"{state.get('newsworthy_score', 0)}/100"
+                        elif node == "Archivist":
+                            evidence_count = len(state.get("evidence_chain", []))
+                            status = "✅" if evidence_count > 0 else "⚠️"
+                            value = f"{evidence_count} kanıt"
+                        elif node == "Searcher":
+                            depth = state.get("search_depth", 0)
+                            status = "✅" if depth > 0 else "⏭️"
+                            value = f"Derinlik: {depth}"
+                        elif node == "Analyst":
+                            score = state.get("contradiction_score", None)
+                            status = "✅" if score is not None else "⏳"
+                            value = f"{score}/10" if score else "-"
+                        elif node == "Editor":
+                            report = state.get("final_report")
+                            status = "✅" if report else "⏳"
+                            value = "Hazır" if report else "-"
+                        else:  # Approval
+                            decision = state.get("human_decision")
+                            status = "✅" if decision == "approved" else ("❌" if decision == "rejected" else "⏳")
+                            value = decision or "Bekliyor"
+                        
+                        st.metric(
+                            label=f"{icon} {node}",
+                            value=value,
+                            delta=status,
+                        )
+                
+                st.divider()
+                
+                # Main results
+                result_col1, result_col2 = st.columns([1, 1])
+                
+                with result_col1:
+                    st.subheader("📈 Analiz Sonucu")
+                    
+                    score = state.get("contradiction_score") or 0
+                    ctype = state.get("contradiction_type", "NONE")
+                    
+                    # Score display
+                    score_color = "#e74c3c" if score >= 7 else ("#f39c12" if score >= 4 else "#27ae60")
+                    st.markdown(f"""
+                    <div style="background: {score_color}; color: white; padding: 2rem; 
+                                border-radius: 12px; text-align: center; margin-bottom: 1rem;">
+                        <div style="font-size: 4rem; font-weight: bold;">{score}/10</div>
+                        <div style="font-size: 1.2rem; opacity: 0.9;">Çelişki Puanı</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Type badge
+                    type_labels = {
+                        "REVERSAL": "🔄 Tam Tersine Dönüş",
+                        "BROKEN_PROMISE": "💔 Kırık Söz",
+                        "INCONSISTENCY": "⚠️ Tutarsızlık",
+                        "PERSONA_SHIFT": "🎭 Persona Değişimi",
+                        "NONE": "✅ Çelişki Yok",
+                    }
+                    st.info(f"**Tür:** {type_labels.get(ctype, ctype)}")
+                    
+                    # Explanation
+                    explanation = state.get("explanation", "")
+                    if explanation:
+                        st.warning(f"**💡 Açıklama:** {explanation}")
+                    
+                    # Key conflict points
+                    conflict_points = state.get("key_conflict_points", [])
+                    if conflict_points:
+                        st.error("**🎯 Çelişki Noktaları:**")
+                        for point in conflict_points:
+                            st.write(f"• {point}")
+                
+                with result_col2:
+                    st.subheader("📄 Çıktılar")
+                    
+                    # Final report
+                    report = state.get("final_report", "")
+                    if report:
+                        with st.expander("📋 Rapor", expanded=True):
+                            st.markdown(report)
+                    
+                    # Tweet
+                    tweet = state.get("tweet_text", "")
+                    if tweet:
+                        with st.expander("🐦 Tweet"):
+                            st.code(tweet, language=None)
+                            st.caption(f"{len(tweet)}/280 karakter")
+                    
+                    # Video script
+                    video = state.get("video_script", "")
+                    if video:
+                        with st.expander("🎬 Video Script"):
+                            st.markdown(video)
+                
+                # Evidence chain
+                evidence_chain = state.get("evidence_chain", [])
+                if evidence_chain:
+                    st.divider()
+                    st.subheader(f"📚 Kanıt Zinciri ({len(evidence_chain)} adet)")
+                    
+                    for i, ev in enumerate(evidence_chain, 1):
+                        if hasattr(ev, 'to_dict'):
+                            ev = ev.to_dict()
+                        
+                        source_type = ev.get("source_type", "UNKNOWN")
+                        date = ev.get("date", "Tarih bilinmiyor")
+                        content = ev.get("content", "")[:300]
+                        
+                        with st.expander(f"Kanıt {i} | {source_type} | {date}"):
+                            st.write(f'"{content}..."')
+                            if ev.get("url"):
+                                st.markdown(f"[🔗 Kaynak]({ev['url']})")
+                
+                # Human approval section (if pending)
+                if state.get("pending_approval") and not state.get("human_decision"):
+                    st.divider()
+                    st.subheader("✅ Onay Bekliyor")
+                    
+                    st.warning("Bu analiz yayınlanmadan önce onayınızı bekliyor.")
+                    
+                    approval_col1, approval_col2 = st.columns(2)
+                    with approval_col1:
+                        if st.button("✅ Onayla", type="primary", use_container_width=True):
+                            st.session_state.agent_state["human_decision"] = "approved"
+                            st.success("✅ Onaylandı!")
+                            st.rerun()
+                    
+                    with approval_col2:
+                        if st.button("❌ Reddet", use_container_width=True):
+                            st.session_state.agent_state["human_decision"] = "rejected"
+                            st.error("❌ Reddedildi")
+                            st.rerun()
+    
+    # =========================================================================
+    # TAB 4: HITL Connection Approvals
+    # =========================================================================
+    
+    with tab_hitl:
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%); 
+                    padding: 1rem; border-radius: 8px; color: white; margin-bottom: 1rem;">
+            <h3 style="margin: 0;">🔗 Bağ Onay Paneli</h3>
+            <p style="margin: 0.5rem 0 0 0; opacity: 0.9;">
+                Hunter Mode tarafından tespit edilen şüpheli siyasetçi-şirket bağları.
+                Her bağı incele ve onayla/reddet.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Check if Neo4j is available
+        try:
+            import asyncio
+            from database import neo4j_client
+            
+            async def get_pending_connections():
+                cypher = """
+                MATCH (pc:PendingConnection)
+                WHERE pc.status = 'PENDING'
+                RETURN pc.speaker_id as speaker_id,
+                       pc.speaker_name as speaker_name,
+                       pc.company_mersis as company_mersis,
+                       pc.company_name as company_name,
+                       pc.evidence_count as evidence_count,
+                       pc.connection_type as connection_type
+                ORDER BY pc.evidence_count DESC
+                LIMIT 50
+                """
+                return await neo4j_client.run_query(cypher)
+            
+            async def update_connection_status(speaker_id, company_mersis, status, conn_type=None):
+                cypher = """
+                MATCH (pc:PendingConnection {speaker_id: $speaker_id, company_mersis: $mersis})
+                SET pc.status = $status,
+                    pc.reviewed_at = datetime()
+                """
+                if conn_type:
+                    cypher += ", pc.connection_type = $conn_type"
+                await neo4j_client.run_write(cypher, {
+                    "speaker_id": speaker_id,
+                    "mersis": company_mersis,
+                    "status": status,
+                    "conn_type": conn_type,
+                })
+                
+                # If approved, create actual CONNECTED_TO relationship
+                if status == "APPROVED" and conn_type:
+                    create_cypher = """
+                    MATCH (p:Politician {pg_id: $speaker_id})
+                    MATCH (o:Organization {mersis_no: $mersis})
+                    MERGE (p)-[r:CONNECTED_TO]->(o)
+                    SET r.type = $conn_type,
+                        r.weight = CASE $conn_type
+                            WHEN 'shareholder' THEN 0.8
+                            WHEN 'board_member' THEN 0.9
+                            WHEN 'former_partner' THEN 0.6
+                            ELSE 0.5
+                        END,
+                        r.source = 'HITL_VERIFIED',
+                        r.last_verified = date()
+                    """
+                    await neo4j_client.run_write(create_cypher, {
+                        "speaker_id": speaker_id,
+                        "mersis": company_mersis,
+                        "conn_type": conn_type,
+                    })
+            
+            # Get pending connections
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            
+            pending = loop.run_until_complete(get_pending_connections())
+            
+            if not pending:
+                st.info("🎉 Bekleyen bağ onayı yok! Hunter Mode çalıştırarak yeni bağlar tespit edin.")
+                st.code("python scripts/hunter_scan.py", language="bash")
+            else:
+                st.success(f"📋 {len(pending)} adet bekleyen bağ onayı")
+                
+                for i, conn in enumerate(pending):
+                    speaker_name = conn.get("speaker_name", "Bilinmiyor")
+                    company_name = conn.get("company_name", "Bilinmiyor")
+                    evidence_count = conn.get("evidence_count", 0)
+                    speaker_id = conn.get("speaker_id")
+                    company_mersis = conn.get("company_mersis")
+                    
+                    # Color based on evidence count
+                    if evidence_count >= 10:
+                        border_color = "#e74c3c"  # Red - high
+                        badge = "🔴 Yüksek"
+                    elif evidence_count >= 5:
+                        border_color = "#f39c12"  # Orange - medium
+                        badge = "🟠 Orta"
+                    else:
+                        border_color = "#3498db"  # Blue - low
+                        badge = "🔵 Düşük"
+                    
+                    with st.container():
+                        st.markdown(f"""
+                        <div style="border-left: 4px solid {border_color}; 
+                                    padding: 1rem; margin-bottom: 1rem; 
+                                    background: #f8f9fa; border-radius: 0 8px 8px 0; color: #2c3e50;">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <div>
+                                    <strong style="font-size: 1.1rem; color: #2c3e50;">👤 {speaker_name}</strong>
+                                    <span style="opacity: 0.6; color: #2c3e50;"> → </span>
+                                    <strong style="font-size: 1.1rem; color: #2c3e50;">🏢 {company_name}</strong>
+                                </div>
+                                <span style="background: {border_color}; color: white; 
+                                            padding: 0.25rem 0.75rem; border-radius: 12px; font-size: 0.8rem;">
+                                    {badge} ({evidence_count} mention)
+                                </span>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+                        
+                        with col1:
+                            conn_type = st.selectbox(
+                                "Bağ Tipi",
+                                ["shareholder", "board_member", "former_partner", "advisor", "unknown"],
+                                key=f"conn_type_{i}",
+                                format_func=lambda x: {
+                                    "shareholder": "💰 Hissedar",
+                                    "board_member": "🪑 Yönetim Kurulu",
+                                    "former_partner": "🤝 Eski Ortak",
+                                    "advisor": "📋 Danışman",
+                                    "unknown": "❓ Bilinmiyor",
+                                }.get(x, x),
+                            )
+                        
+                        with col2:
+                            if st.button("✅ Onayla", key=f"approve_{i}", type="primary"):
+                                loop.run_until_complete(
+                                    update_connection_status(speaker_id, company_mersis, "APPROVED", conn_type)
+                                )
+                                st.success("Onaylandı!")
+                                st.rerun()
+                        
+                        with col3:
+                            if st.button("❌ Reddet", key=f"reject_{i}"):
+                                loop.run_until_complete(
+                                    update_connection_status(speaker_id, company_mersis, "REJECTED")
+                                )
+                                st.warning("Reddedildi")
+                                st.rerun()
+                        
+                        with col4:
+                            if st.button("⏭️ Atla", key=f"skip_{i}"):
+                                loop.run_until_complete(
+                                    update_connection_status(speaker_id, company_mersis, "SKIPPED")
+                                )
+                                st.rerun()
+                        
+                        with st.expander("🔍 Kanıtları Gör (Örnek Beyanatlar)"):
+                            # Reset Neo4j driver to handle Streamlit loop changes
+                            loop.run_until_complete(neo4j_client.close_driver())
+                            
+                            ev_limit = 5
+                            evidence_list = loop.run_until_complete(
+                                neo4j_client.get_pending_connection_evidence(speaker_id, company_mersis, ev_limit)
+                            )
+                            if evidence_list:
+                                for ev in evidence_list:
+                                    st.markdown(f"**🗓 {ev.get('date')}**")
+                                    st.markdown(f"> \"{ev.get('text')}\"")
+                                    st.caption(f"ID: {ev.get('pg_id')} | Eşleşen Kelime: `{ev.get('keyword')}`")
+                                    st.markdown("---")
+                            else:
+                                st.info("Kanıt bulunamadı.")
+                        
+                        st.divider()
+                        
+        except ImportError as e:
+            st.error(f"Neo4j client yüklenemedi: {e}")
+        except Exception as e:
+            st.warning(f"Neo4j bağlantısı kurulamadı: {e}")
+            st.info("Neo4j container'ı çalıştırın: `docker compose up -d neo4j`")
     
     # =========================================================================
     # Analysis Result (inside Manual tab)

@@ -1,0 +1,10 @@
+{
+  "total_processed": 73536,
+  "successful": 0,
+  "duplicates": 73028,
+  "validation_failed": 508,
+  "db_errors": 0,
+  "speakers_created": 0,
+  "elapsed_seconds": 34.47,
+  "records_per_second": 2133.61
+}

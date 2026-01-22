@@ -43,6 +43,17 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_model: str = "gemini-pro"
     
+    # Tavily API (for web search)
+    tavily_api_key: str = ""
+    
+    # Neo4j (Graph Database)
+    neo4j_uri: str = "bolt://localhost:7687"
+    neo4j_user: str = "neo4j"
+    neo4j_password: str = "regusense_dev"
+    
+    # Database (PostgreSQL)
+    database_url: str = "postgresql+asyncpg://regusense:regusense_dev_2026@localhost:5432/regusense"
+    
     def ensure_directories(self) -> None:
         """Create all required data directories if they don't exist."""
         for directory in [

@@ -1,0 +1,105 @@
+{
+  "total": 73536,
+  "unique": 70688,
+  "duplicates": 2848,
+  "reduction_pct": 3.87,
+  "top_speakers": [
+    [
+      "BAŞKAN MEHMET MUŞ",
+      12335
+    ],
+    [
+      "BAŞKAN",
+      8807
+    ],
+    [
+      "OTURUM BAŞKANI ORHAN ERDEM",
+      2463
+    ],
+    [
+      "BAŞKAN CÜNEYT YÜKSEL",
+      2097
+    ],
+    [
+      "BAŞKAN MUSTAFA VARANK",
+      1411
+    ],
+    [
+      "AHMET VEHBİ BAKIRLIOĞLU (Manisa)",
+      1264
+    ],
+    [
+      "RAHMİ AŞKIN TÜRELİ (İzmir)",
+      1101
+    ],
+    [
+      "BAŞKAN CEVDET YILMAZ",
+      1086
+    ],
+    [
+      "İSMAİL GÜNEŞ (Uşak)",
+      1047
+    ],
+    [
+      "BAŞKAN FUAT OKTAY",
+      887
+    ]
+  ],
+  "source_types": {
+    "UNKNOWN": 52914,
+    "SOCIAL_MEDIA": 9,
+    "TBMM_GENERAL_ASSEMBLY": 20613
+  },
+  "duplicate_samples": [
+    {
+      "count": 2,
+      "speaker": "BAŞKAN MEHMET MUŞ",
+      "preview": "Değerli milletvekilleri, Sayın Cumhurbaşkanı Yardımcımız, Plan ve Bütçe Komisyonumuzun değerli üyele"
+    },
+    {
+      "count": 2,
+      "speaker": "BAŞKAN MEHMET MUŞ",
+      "preview": "Sayın Oluç, gördüm. Şimdi de Komisyonumuzda toplantıya katılan bürokratların kendilerini tanıtmaları"
+    },
+    {
+      "count": 2,
+      "speaker": "BAŞKAN MEHMET MUŞ",
+      "preview": "Sayın Oluç, buyurun, nedir mesele?"
+    },
+    {
+      "count": 2,
+      "speaker": "HAKKI SARUHAN OLUÇ (Antalya)",
+      "preview": "Usul hakkında bir şey söylemek istiyorum efendim."
+    },
+    {
+      "count": 2,
+      "speaker": "BAŞKAN MEHMET MUŞ",
+      "preview": "Usul tartışması... Sayın Ağbaba, siz niye bastınız? VELİ AĞBABA (Malatya) - Anlatacağım Sayın Başkan"
+    },
+    {
+      "count": 2,
+      "speaker": "BAŞKAN MEHMET MUŞ",
+      "preview": "Tamam, usul tartışmasını ben yapmıştım, bir daha usulümle alakalı mı bir tartışma var? Hayır, herkes"
+    },
+    {
+      "count": 2,
+      "speaker": "BAŞKAN MEHMET MUŞ",
+      "preview": "Sayın Arı, siz oy vermediniz ama bu Komisyon oy verdi benim usulümle alakalı yönteme. VELİ AĞBABA (M"
+    },
+    {
+      "count": 2,
+      "speaker": "BAŞKAN MEHMET MUŞ",
+      "preview": "Bugün ne yaptım? Aynı şey, işte, okudum isimleri yine. Sayın Oluç, buyurun. İki dakika süre veriyoru"
+    },
+    {
+      "count": 2,
+      "speaker": "HAKKI SARUHAN OLUÇ (Antalya)",
+      "preview": "Teşekkür ederim Sayın Başkan. Sayın Cumhurbaşkanı Yardımcısı, değerli bürokratlar; hoş geldiniz. Şim"
+    },
+    {
+      "count": 2,
+      "speaker": "BAŞKAN MEHMET MUŞ",
+      "preview": "Teşekkür ediyorum. Sayın Ağbaba, buyurun iki dakika da size veriyorum. VELİ AĞBABA (Malatya) - Ben d"
+    }
+  ]
+}
