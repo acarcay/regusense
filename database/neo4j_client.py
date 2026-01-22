@@ -177,6 +177,33 @@ async def load_politicians_for_masking() -> list[tuple[int, str]]:
     return politicians
 
 
+async def get_dynamic_ambiguous_keywords() -> set[str]:
+    """
+    Find politician surnames that overlap with Organization names/keywords.
+    
+    This replaces the static AMBIGUOUS_KEYWORDS list with database-driven logic.
+    When a new politician like "Koç" is added, the system automatically detects
+    the overlap with "Koç Holding" without code changes.
+    
+    Returns:
+        Set of lowercase surnames that are also found in organization names
+    """
+    # Extract surname as the last word from politician name
+    cypher = """
+    MATCH (p:Politician), (o:Organization)
+    WHERE p.name IS NOT NULL AND o.name IS NOT NULL
+    WITH p, o, split(p.name, ' ')[-1] AS surname
+    WHERE size(surname) >= 3
+      AND (toLower(o.name) CONTAINS toLower(surname)
+           OR ANY(kw IN o.keywords WHERE toLower(kw) = toLower(surname)))
+    RETURN DISTINCT toLower(surname) as ambiguous_keyword
+    """
+    results = await run_query(cypher)
+    keywords = {r['ambiguous_keyword'] for r in results if r['ambiguous_keyword']}
+    logger.info(f"Detected {len(keywords)} dynamic ambiguous keywords from Neo4j")
+    return keywords
+
+
 # =============================================================================
 # Query Execution
 # =============================================================================

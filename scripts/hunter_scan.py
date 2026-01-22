@@ -35,6 +35,7 @@ from sqlalchemy import select, func
 logger = logging.getLogger(__name__)
 
 from intelligence.entity_masker import get_masker
+from intelligence.cascade_processor import CascadeProcessor, MatchResult
 
 @dataclass
 class HunterStats:
@@ -44,21 +45,35 @@ class HunterStats:
     unique_companies_mentioned: Set[str] = field(default_factory=set)
     speakers_with_mentions: Set[int] = field(default_factory=set)
 
-# Strict Filtering Configuration
-AMBIGUOUS_KEYWORDS = {"cengiz", "yüksel", "kalyon", "bayburt", "demir", "çelik", "özdemir", "kolin"}
+# Strict Filtering Configuration (these are now loaded dynamically but kept as fallback)
+STATIC_AMBIGUOUS_KEYWORDS = {"cengiz", "yüksel", "kalyon", "bayburt", "demir", "çelik", "özdemir", "kolin"}
 CORPORATE_TRIGGERS = {"holding", "inşaat", "aş", "a.ş", "şirket", "ihale", "pazarlık", "yapı", "turizm", "enerji", "yatırım", "grup", "maden", "limak"}
 STRICT_SUFFIXES = {"holding", "inşaat", "aş", "a.ş", "limited", "şirketi", "grup", "yapı", "sanayi", "ticaret", "turizm", "enerji"}
+
+# Dynamic ambiguous keywords (loaded from Neo4j at runtime)
+DYNAMIC_AMBIGUOUS_KEYWORDS: set[str] = set()
+
+# NLP Models for cascade processing
+nlp_heavy = None  # Transformer model (expensive)
+nlp_light = None  # Small model (cheap) - placeholder for future
 
 # Global cache for politicians
 KNOWN_POLITICIANS = set()
 
-# Load Spacy model
+# Load Spacy Transformer model (Heavy - L2)
 try:
-    nlp = spacy.load("tr_core_news_trf")
-    logger.info("Spacy Turkish Transformer model loaded successfully")
+    nlp_heavy = spacy.load("tr_core_news_trf")
+    logger.info("Spacy Turkish Transformer model loaded (L2 Heavy)")
 except Exception as e:
-    logger.warning(f"Failed to load Spacy model: {e}. Running without NER...")
-    nlp = None
+    logger.warning(f"Failed to load Heavy NER model: {e}. L2 disabled.")
+    nlp_heavy = None
+
+# Load Spacy Small model (Light - L1) - optional
+try:
+    nlp_light = spacy.load("tr_core_news_sm")
+    logger.info("Spacy Turkish Small model loaded (L1 Light)")
+except Exception:
+    nlp_light = None  # Will use heuristics only in L1
 
 async def load_politicians():
     """Load all politician names into the global cache."""
@@ -317,7 +332,7 @@ async def run_hunter_scan(
         create_pending_threshold: Min mentions to create pending connection
     """
     logger.info("=" * 60)
-    logger.info("🎯 HUNTER MODE: Scanning for Company Mentions")
+    logger.info("🎯 HUNTER MODE: Scanning for Company Mentions (Cascade Processor)")
     logger.info("=" * 60)
     
     # Load politicians for blacklist check
@@ -333,6 +348,21 @@ async def run_hunter_scan(
     if not keyword_map:
         logger.error("No company keywords found. Run import_construction_companies.py first.")
         return
+    
+    # Load dynamic ambiguous keywords from Neo4j (replaces static list)
+    global DYNAMIC_AMBIGUOUS_KEYWORDS
+    DYNAMIC_AMBIGUOUS_KEYWORDS = await neo4j_client.get_dynamic_ambiguous_keywords()
+    # Union with static fallback for safety
+    all_ambiguous = DYNAMIC_AMBIGUOUS_KEYWORDS | STATIC_AMBIGUOUS_KEYWORDS
+    logger.info(f"Ambiguous keywords: {len(all_ambiguous)} (dynamic: {len(DYNAMIC_AMBIGUOUS_KEYWORDS)})")
+    
+    # Initialize Cascade Processor
+    cascade = CascadeProcessor(
+        keyword_map=keyword_map,
+        ambiguous_set=all_ambiguous,
+        nlp_light=nlp_light,
+        nlp_heavy=nlp_heavy,
+    )
     
     stats = HunterStats()
     
@@ -374,31 +404,42 @@ async def run_hunter_scan(
                 # Step 1: Mask politician names to prevent false positives
                 masked_text, _ = masker.mask(statement.text)
                 
-                # Step 2: Find company mentions in MASKED text
-                mentions = find_company_mentions(masked_text, keyword_map, speaker.name)
+                # Step 2: Run Cascade Processor (L0 → L1 → L2)
+                cascade_results = cascade.process(
+                    text=statement.text,
+                    speaker_name=speaker.name,
+                    masked_text=masked_text,
+                )
                 
-                for keyword, company_name, mersis in mentions:
-                    stats.matches_found += 1
-                    stats.unique_companies_mentioned.add(mersis)
-                    stats.speakers_with_mentions.add(speaker.id)
-                    
-                    # Store names for later
-                    speaker_names[speaker.id] = speaker.name
-                    company_names[mersis] = company_name
-                    
-                    # Track counts
-                    key = (speaker.id, mersis)
-                    speaker_company_counts[key] = speaker_company_counts.get(key, 0) + 1
-                    
-                    # Create relationship
-                    await create_mentioned_by_relationship(
-                        statement.id,
-                        statement.text,
-                        statement.date,
-                        mersis,
-                        keyword,
-                        speaker.id,
-                    )
+                for cr in cascade_results:
+                    if cr.decision == MatchResult.CLEAR_ORG:
+                        # Definite company mention
+                        stats.matches_found += 1
+                        stats.unique_companies_mentioned.add(cr.mersis_no)
+                        stats.speakers_with_mentions.add(speaker.id)
+                        
+                        speaker_names[speaker.id] = speaker.name
+                        company_names[cr.mersis_no] = cr.company_name
+                        
+                        key = (speaker.id, cr.mersis_no)
+                        speaker_company_counts[key] = speaker_company_counts.get(key, 0) + 1
+                        
+                        await create_mentioned_by_relationship(
+                            statement.id,
+                            statement.text,
+                            statement.date,
+                            cr.mersis_no,
+                            cr.keyword,
+                            speaker.id,
+                        )
+                    elif cr.decision == MatchResult.CONFLICT:
+                        # Needs HITL review - create pending with special flag
+                        logger.debug(f"HITL Queue: {cr.keyword} in statement {statement.id} ({cr.method})")
+                        # Track for pending connection creation later
+                        speaker_names[speaker.id] = speaker.name
+                        company_names[cr.mersis_no] = cr.company_name
+                        key = (speaker.id, cr.mersis_no)
+                        speaker_company_counts[key] = speaker_company_counts.get(key, 0) + 1
             
             offset += batch_size
             
