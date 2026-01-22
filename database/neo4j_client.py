@@ -437,3 +437,139 @@ async def get_pending_connection_evidence(
         "mersis": company_mersis,
         "limit": limit
     })
+
+
+# =============================================================================
+# Intent-Based Relationships (Phase 8)
+# =============================================================================
+
+async def create_criticized_relationship(
+    speaker_id: int,
+    org_mersis: str,
+    statement_id: int,
+    confidence: float,
+    key_triggers: list[str],
+) -> dict:
+    """
+    Create CRITICIZED relationship (opposition critiquing a company).
+    
+    This replaces MENTIONED_BY for negative/attack mentions.
+    """
+    cypher = """
+    MATCH (p:Politician {pg_id: $speaker_id})
+    MATCH (o:Organization {mersis_no: $mersis})
+    MERGE (p)-[r:CRITICIZED]->(o)
+    SET r.statement_id = $statement_id,
+        r.confidence = $confidence,
+        r.key_triggers = $triggers,
+        r.created_at = datetime()
+    RETURN r
+    """
+    return await run_write(cypher, {
+        "speaker_id": speaker_id,
+        "mersis": org_mersis,
+        "statement_id": statement_id,
+        "confidence": confidence,
+        "triggers": key_triggers,
+    })
+
+
+async def create_advocated_relationship(
+    speaker_id: int,
+    org_mersis: str,
+    statement_id: int,
+    confidence: float,
+    is_conflict_candidate: bool,
+    key_triggers: list[str],
+) -> dict:
+    """
+    Create ADVOCATED relationship (speaker defending/supporting a company).
+    
+    If is_conflict_candidate=True, this is flagged for HITL review.
+    """
+    cypher = """
+    MATCH (p:Politician {pg_id: $speaker_id})
+    MATCH (o:Organization {mersis_no: $mersis})
+    MERGE (p)-[r:ADVOCATED]->(o)
+    SET r.statement_id = $statement_id,
+        r.confidence = $confidence,
+        r.is_conflict = $is_conflict,
+        r.key_triggers = $triggers,
+        r.created_at = datetime()
+    RETURN r
+    """
+    return await run_write(cypher, {
+        "speaker_id": speaker_id,
+        "mersis": org_mersis,
+        "statement_id": statement_id,
+        "confidence": confidence,
+        "is_conflict": is_conflict_candidate,
+        "triggers": key_triggers,
+    })
+
+
+async def update_politician_party(
+    pg_id: int,
+    party: str,
+    is_opposition: bool,
+) -> dict:
+    """
+    Update politician with party affiliation and opposition flag.
+    
+    Args:
+        pg_id: Politician PG ID
+        party: Party name (AKP, CHP, etc.)
+        is_opposition: True if opposition party
+    """
+    cypher = """
+    MATCH (p:Politician {pg_id: $pg_id})
+    SET p.party = $party,
+        p.is_opposition = $is_opposition,
+        p.updated_at = datetime()
+    RETURN p
+    """
+    return await run_write(cypher, {
+        "pg_id": pg_id,
+        "party": party,
+        "is_opposition": is_opposition,
+    })
+
+
+async def get_conflict_candidates(limit: int = 50) -> list[dict]:
+    """
+    Get all ADVOCATED relationships marked as conflict candidates.
+    
+    These are government-bloc speakers defending companies.
+    """
+    cypher = """
+    MATCH (p:Politician)-[r:ADVOCATED {is_conflict: true}]->(o:Organization)
+    RETURN p.name as speaker,
+           p.party as party,
+           o.name as company,
+           o.mersis_no as mersis,
+           r.confidence as confidence,
+           r.key_triggers as triggers,
+           r.statement_id as statement_id
+    ORDER BY r.confidence DESC
+    LIMIT $limit
+    """
+    return await run_query(cypher, {"limit": limit})
+
+
+async def get_criticism_stats() -> dict:
+    """Get statistics on CRITICIZED vs ADVOCATED relationships."""
+    cypher = """
+    MATCH ()-[c:CRITICIZED]->()
+    WITH count(c) as criticized_count
+    MATCH ()-[a:ADVOCATED]->()
+    WITH criticized_count, count(a) as advocated_count
+    MATCH ()-[ac:ADVOCATED {is_conflict: true}]->()
+    RETURN criticized_count,
+           advocated_count,
+           count(ac) as conflict_candidates
+    """
+    results = await run_query(cypher)
+    if results:
+        return results[0]
+    return {"criticized_count": 0, "advocated_count": 0, "conflict_candidates": 0}
+

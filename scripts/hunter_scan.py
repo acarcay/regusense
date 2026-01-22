@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 
 from intelligence.entity_masker import get_masker
 from intelligence.cascade_processor import CascadeProcessor, MatchResult
+from intelligence.intent_classifier import IntentClassifier, PoliticalIntent
 
 @dataclass
 class HunterStats:
@@ -44,6 +45,11 @@ class HunterStats:
     matches_found: int = 0
     unique_companies_mentioned: Set[str] = field(default_factory=set)
     speakers_with_mentions: Set[int] = field(default_factory=set)
+    # Intent classification stats (Phase 8)
+    criticize_count: int = 0
+    advocate_count: int = 0
+    neutral_count: int = 0
+    conflict_candidates: int = 0
 
 # Strict Filtering Configuration (these are now loaded dynamically but kept as fallback)
 STATIC_AMBIGUOUS_KEYWORDS = {"cengiz", "yüksel", "kalyon", "bayburt", "demir", "çelik", "özdemir", "kolin"}
@@ -364,6 +370,14 @@ async def run_hunter_scan(
         nlp_heavy=nlp_heavy,
     )
     
+    # Initialize Intent Classifier (Phase 8)
+    intent_classifier = None
+    try:
+        intent_classifier = IntentClassifier()
+        logger.info("🎭 Intent Classifier initialized (Phase 8: CRITICIZE/ADVOCATE/NEUTRAL)")
+    except Exception as e:
+        logger.warning(f"Intent Classifier not available: {e}. Using legacy MENTIONED_BY.")
+    
     stats = HunterStats()
     
     # Track speaker-company mention counts for pending connections
@@ -424,14 +438,68 @@ async def run_hunter_scan(
                         key = (speaker.id, cr.mersis_no)
                         speaker_company_counts[key] = speaker_company_counts.get(key, 0) + 1
                         
-                        await create_mentioned_by_relationship(
-                            statement.id,
-                            statement.text,
-                            statement.date,
-                            cr.mersis_no,
-                            cr.keyword,
-                            speaker.id,
-                        )
+                        # Phase 8: Intent Classification
+                        if intent_classifier:
+                            try:
+                                intent_result = intent_classifier.classify(
+                                    statement=statement.text,
+                                    company_name=cr.company_name,
+                                    speaker_party=getattr(speaker, 'party', None),
+                                )
+                                
+                                if intent_result.intent == PoliticalIntent.CRITICIZE:
+                                    stats.criticize_count += 1
+                                    await neo4j_client.create_criticized_relationship(
+                                        speaker_id=speaker.id,
+                                        org_mersis=cr.mersis_no,
+                                        statement_id=statement.id,
+                                        confidence=intent_result.confidence,
+                                        key_triggers=intent_result.key_triggers,
+                                    )
+                                elif intent_result.intent == PoliticalIntent.ADVOCATE:
+                                    stats.advocate_count += 1
+                                    if intent_result.is_conflict_candidate:
+                                        stats.conflict_candidates += 1
+                                    await neo4j_client.create_advocated_relationship(
+                                        speaker_id=speaker.id,
+                                        org_mersis=cr.mersis_no,
+                                        statement_id=statement.id,
+                                        confidence=intent_result.confidence,
+                                        is_conflict_candidate=intent_result.is_conflict_candidate,
+                                        key_triggers=intent_result.key_triggers,
+                                    )
+                                else:
+                                    # NEUTRAL - fall back to legacy MENTIONED_BY
+                                    stats.neutral_count += 1
+                                    await create_mentioned_by_relationship(
+                                        statement.id,
+                                        statement.text,
+                                        statement.date,
+                                        cr.mersis_no,
+                                        cr.keyword,
+                                        speaker.id,
+                                    )
+                            except Exception as e:
+                                logger.debug(f"Intent classification failed: {e}")
+                                # Fallback to MENTIONED_BY
+                                await create_mentioned_by_relationship(
+                                    statement.id,
+                                    statement.text,
+                                    statement.date,
+                                    cr.mersis_no,
+                                    cr.keyword,
+                                    speaker.id,
+                                )
+                        else:
+                            # No intent classifier - use legacy MENTIONED_BY
+                            await create_mentioned_by_relationship(
+                                statement.id,
+                                statement.text,
+                                statement.date,
+                                cr.mersis_no,
+                                cr.keyword,
+                                speaker.id,
+                            )
                     elif cr.decision == MatchResult.CONFLICT:
                         # Needs HITL review - create pending with special flag
                         logger.debug(f"HITL Queue: {cr.keyword} in statement {statement.id} ({cr.method})")
@@ -473,6 +541,14 @@ async def run_hunter_scan(
     logger.info(f"  Unique Companies: {len(stats.unique_companies_mentioned)}")
     logger.info(f"  Speakers with Mentions: {len(stats.speakers_with_mentions)}")
     logger.info(f"  Pending Connections (HITL): {pending_count}")
+    # Phase 8 Intent Stats
+    if stats.criticize_count or stats.advocate_count or stats.neutral_count:
+        logger.info("-" * 40)
+        logger.info("🎭 INTENT CLASSIFICATION (Phase 8):")
+        logger.info(f"  ❌ CRITICIZE: {stats.criticize_count}")
+        logger.info(f"  ✅ ADVOCATE: {stats.advocate_count}")
+        logger.info(f"  ⚪ NEUTRAL: {stats.neutral_count}")
+        logger.info(f"  ⚠️  CONFLICT CANDIDATES: {stats.conflict_candidates}")
     logger.info("=" * 60)
 
 

@@ -19,6 +19,9 @@ class SourceType(str, Enum):
     RESMI_GAZETE = "RESMI_GAZETE"
     TV_INTERVIEW = "TV_INTERVIEW"
     NEWS = "NEWS"
+    EKAP = "EKAP"  # KİK Tender Platform
+    TUIK_TSG = "TUIK_TSG"  # TÜİK Ticaret Sicil
+    TOBB = "TOBB"  # TOBB Ticaret Sicil Gazetesi
     UNKNOWN = "UNKNOWN"
 
 
@@ -236,3 +239,164 @@ class ScrapeResult(BaseModel):
         default=None,
         description="Path to saved file",
     )
+
+
+# =============================================================================
+# Government Data Models
+# =============================================================================
+
+class TenderResult(BaseModel):
+    """EKAP tender result data from KİK."""
+    
+    ikn: str = Field(
+        ...,
+        description="İhale Kayıt Numarası (Tender Registration Number)",
+    )
+    title: str = Field(
+        ...,
+        description="İhale konusu (Tender subject)",
+    )
+    winner_company: str = Field(
+        ...,
+        description="Kazanan şirket adı",
+    )
+    winner_mersis: Optional[str] = Field(
+        default=None,
+        description="Winner company MERSIS number",
+    )
+    bid_amount: float = Field(
+        ...,
+        ge=0,
+        description="Kazanan teklif tutarı",
+    )
+    currency: str = Field(
+        default="TRY",
+        description="Currency code",
+    )
+    tender_date: str = Field(
+        ...,
+        description="YYYY-MM-DD format",
+    )
+    sector: str = Field(
+        default="CONSTRUCTION",
+        description="Tender sector",
+    )
+    contracting_authority: str = Field(
+        default="",
+        description="İhaleyi yapan kurum",
+    )
+    source_url: str = Field(
+        ...,
+        description="EKAP URL",
+    )
+    
+    def to_neo4j_params(self) -> dict[str, Any]:
+        """Convert to Neo4j parameters for graph insertion."""
+        return {
+            "ikn": self.ikn,
+            "title": self.title,
+            "winner": self.winner_company,
+            "mersis": self.winner_mersis,
+            "amount": self.bid_amount,
+            "currency": self.currency,
+            "date": self.tender_date,
+            "sector": self.sector,
+            "authority": self.contracting_authority,
+            "source": self.source_url,
+        }
+
+
+class BoardMember(BaseModel):
+    """TÜİK TSG board member data."""
+    
+    company_mersis: str = Field(
+        ...,
+        description="Company MERSIS number",
+    )
+    company_name: str = Field(
+        ...,
+        description="Company official name",
+    )
+    member_name: str = Field(
+        ...,
+        description="Board member full name",
+    )
+    position: str = Field(
+        ...,
+        description="Yönetim Kurulu Başkanı, Üye, Genel Müdür, etc.",
+    )
+    start_date: Optional[str] = Field(
+        default=None,
+        description="Position start date YYYY-MM-DD",
+    )
+    end_date: Optional[str] = Field(
+        default=None,
+        description="Position end date if no longer active",
+    )
+    tc_kimlik: Optional[str] = Field(
+        default=None,
+        description="TC Kimlik if publicly available",
+    )
+    
+    def to_neo4j_params(self) -> dict[str, Any]:
+        """Convert to Neo4j parameters."""
+        return {
+            "mersis": self.company_mersis,
+            "company": self.company_name,
+            "name": self.member_name,
+            "position": self.position,
+            "start": self.start_date,
+            "end": self.end_date,
+        }
+
+
+class CompanyUpdate(BaseModel):
+    """TOBB Ticaret Sicil Gazetesi legal update."""
+    
+    company_name: str = Field(
+        ...,
+        description="Company name in announcement",
+    )
+    mersis_no: Optional[str] = Field(
+        default=None,
+        description="MERSIS number if available",
+    )
+    update_type: str = Field(
+        ...,
+        description="KURULUŞ, UNVAN DEĞİŞİKLİĞİ, TASFİYE, SERMAYE ARTIŞI, etc.",
+    )
+    gazette_date: str = Field(
+        ...,
+        description="Gazette publication date YYYY-MM-DD",
+    )
+    gazette_number: str = Field(
+        ...,
+        description="Gazette issue number",
+    )
+    summary: str = Field(
+        default="",
+        description="Brief summary of the update",
+    )
+    old_name: Optional[str] = Field(
+        default=None,
+        description="Previous company name (for name changes)",
+    )
+    capital: Optional[float] = Field(
+        default=None,
+        ge=0,
+        description="Company capital amount",
+    )
+    
+    def to_neo4j_params(self) -> dict[str, Any]:
+        """Convert to Neo4j parameters."""
+        return {
+            "company": self.company_name,
+            "mersis": self.mersis_no,
+            "type": self.update_type,
+            "gazette_date": self.gazette_date,
+            "gazette_no": self.gazette_number,
+            "summary": self.summary,
+            "old_name": self.old_name,
+            "capital": self.capital,
+        }
+
