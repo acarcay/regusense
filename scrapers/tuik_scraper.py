@@ -332,6 +332,11 @@ class TuikScraper(BaseScraper):
                 continue
         return None
 
+    async def scrape(self, *args, **kwargs):
+        """Implement abstract scrape() method from BaseScraper. Delegates to scrape_by_company()."""
+        mersis_no = args[0] if args else kwargs.get("mersis_no", "")
+        return await self.scrape_by_company(mersis_no)
+
 
 # =============================================================================
 # CLI

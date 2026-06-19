@@ -175,16 +175,18 @@ st.markdown("""
 # Session State Initialization
 # =========================================================================
 
-@st.cache_resource
+@st.cache_resource(show_spinner=False)
 def load_memory():
     """Load PoliticalMemory (cached)."""
-    return PoliticalMemory()
+    with st.spinner("🔄 AI modeli yükleniyor... İlk çalıştırmada ~200 MB model dosyası indirilecek (1-2 dakika sürebilir)"):
+        return PoliticalMemory()
 
 
-@st.cache_resource
+@st.cache_resource(show_spinner=False)
 def load_analyzer():
     """Load GeminiAnalyst (cached)."""
-    return GeminiAnalyst()
+    with st.spinner("🤖 Gemini Analyst yükleniyor..."):
+        return GeminiAnalyst()
 
 
 @st.cache_data(ttl=3600)
@@ -235,13 +237,26 @@ def open_pdf(filepath: str, page: int = 1):
 # =========================================================================
 
 def main():
+    # Display loading status BEFORE any heavy lifting
+    loading_placeholder = st.empty()
+    
+    loading_placeholder.info("""
+    🔄 **Sistem başlatılıyor...**  
+    İlk çalıştırmada AI modeli indirilecek (~200 MB, 1-2 dakika sürebilir).  
+    Lütfen bekleyin, sayfa beyaz görünse de arka planda işlem devam ediyor...
+    """)
+    
     # Load resources
     try:
         memory = load_memory()
         analyzer = load_analyzer()
         speakers = get_speakers()
         detector = get_detector(memory, analyzer)
+        
+        # Clear loading message once everything is loaded
+        loading_placeholder.empty()
     except Exception as e:
+        loading_placeholder.empty()
         st.error(f"Sistem başlatılamadı: {e}")
         st.stop()
     
@@ -1069,9 +1084,9 @@ def main():
                         filter_by_speaker=bool(selected_speaker),
                     )
                 
-                # Display score
+                # Display score (NOTE: engine now uses 0-10 scale)
                 score = result.contradiction_score
-                score_class = "high" if score >= 70 else ("medium" if score >= 40 else "low")
+                score_class = "high" if score >= 7 else ("medium" if score >= 4 else "low")
                 verdict_text = "ÇELİŞKİ TESPİT EDİLDİ" if result.is_contradiction else "TUTARLI"
                 
                 st.markdown(f"""

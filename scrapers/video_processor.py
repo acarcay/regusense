@@ -22,10 +22,11 @@ import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Any
 import re
 
 import yt_dlp
+# pyrefly: ignore [missing-import]
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
 import whisper
 
@@ -68,7 +69,7 @@ class VideoProcessor:
     def __init__(
         self,
         whisper_model: str = "base",  # tiny, base, small, medium, large
-        memory: Optional[object] = None,
+        memory: Optional[Any] = None,
     ):
         """
         Initialize video processor.
@@ -78,8 +79,8 @@ class VideoProcessor:
             memory: PoliticalMemory instance (optional, for ingestion)
         """
         self.whisper_model_name = whisper_model
-        self._whisper_model = None
-        self.memory = memory or get_memory()
+        self._whisper_model: Any = None
+        self.memory: Any = memory or get_memory()
         
         logger.info(f"VideoProcessor initialized (Whisper: {whisper_model})")
 
@@ -106,24 +107,24 @@ class VideoProcessor:
 
     def get_video_metadata(self, video_id: str) -> Optional[VideoMetadata]:
         """Fetch video metadata using yt-dlp."""
-        ydl_opts = {
+        ydl_opts: dict[str, Any] = {
             'quiet': True,
             'no_warnings': True,
             'skip_download': True,
         }
         
         try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:  # type: ignore[arg-type]
                 info = ydl.extract_info(video_id, download=False)
-                parsed_date = datetime.strptime(info.get('upload_date', '20240101'), "%Y%m%d").strftime("%Y-%m-%d")
+                parsed_date = datetime.strptime(str(info.get('upload_date') or '20240101'), "%Y%m%d").strftime("%Y-%m-%d")
                 
                 return VideoMetadata(
                     video_id=video_id,
-                    title=info.get('title', 'Unknown'),
-                    channel_name=info.get('uploader', 'Unknown'),
+                    title=info.get('title') or 'Unknown',
+                    channel_name=info.get('uploader') or 'Unknown',
                     upload_date=parsed_date,
                     url=f"https://www.youtube.com/watch?v={video_id}",
-                    duration=info.get('duration', 0)
+                    duration=info.get('duration') or 0
                 )
         except Exception as e:
             logger.error(f"Failed to get metadata for {video_id}: {e}")
@@ -170,7 +171,7 @@ class VideoProcessor:
             temp_path = Path(temp_dir)
             output_template = str(temp_path / "%(id)s.%(ext)s")
             
-            ydl_opts = {
+            ydl_opts: dict[str, Any] = {
                 'format': 'bestaudio/best',
                 'postprocessors': [{
                     'key': 'FFmpegExtractAudio',
@@ -183,7 +184,7 @@ class VideoProcessor:
             
             try:
                 logger.info(f"Downloading audio for {video_id}...")
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:  # type: ignore[arg-type]
                     ydl.download([url])
                 
                 audio_file = list(temp_path.glob("*.mp3"))[0]
@@ -276,14 +277,14 @@ class VideoProcessor:
 
     def search_and_process(self, query: str, max_results: int = 3):
         """Search YouTube and process top videos."""
-        ydl_opts = {
+        ydl_opts: dict[str, Any] = {
             'quiet': True,
             'extract_flat': True,
             'default_search': 'ytsearch',
         }
         
         try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:  # type: ignore[arg-type]
                 result = ydl.extract_info(f"ytsearch{max_results}:{query}", download=False)
                 
                 if 'entries' in result:

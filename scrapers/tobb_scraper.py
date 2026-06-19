@@ -92,9 +92,9 @@ class TobbScraper(BaseScraper):
         """Override to add stealth settings."""
         await super()._start_browser()
         
-        # Apply stealth settings if available
+        # Check if playwright-stealth is available
         try:
-            from playwright_stealth import stealth_async
+            import playwright_stealth  # noqa: F401
             self._stealth_available = True
         except ImportError:
             self._stealth_available = False
@@ -102,12 +102,14 @@ class TobbScraper(BaseScraper):
     
     async def _create_stealth_page(self):
         """Create a page with stealth settings applied."""
+        if self._context is None:
+            raise RuntimeError("Browser not started. Use 'async with' context manager.")
         page = await self._context.new_page()
         
         # Apply stealth if available
-        if hasattr(self, '_stealth_available') and self._stealth_available:
+        if getattr(self, '_stealth_available', False):
             try:
-                from playwright_stealth import stealth_async
+                from playwright_stealth import stealth_async  # type: ignore[import]
                 await stealth_async(page)
             except Exception as e:
                 logger.debug(f"Failed to apply stealth: {e}")
@@ -389,6 +391,10 @@ class TobbScraper(BaseScraper):
             except ValueError:
                 continue
         return ""
+
+    async def scrape(self, *args, **kwargs):
+        """Implement abstract scrape() method from BaseScraper. Delegates to scrape_latest()."""
+        return await self.scrape_latest(*args, **kwargs)
 
 
 # =============================================================================

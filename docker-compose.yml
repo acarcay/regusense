@@ -1,20 +1,25 @@
 version: '3.8'
 
+# Tüm gizli değerler .env dosyasından okunur.
+# Lütfen .env.example'ı kopyalayarak .env oluşturun.
+
 services:
   postgres:
     image: postgres:16-alpine
     container_name: regusense_postgres
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
-      POSTGRES_USER: regusense
-      POSTGRES_PASSWORD: regusense_dev_2026
-      POSTGRES_DB: regusense
+      POSTGRES_USER: ${POSTGRES_USER:-regusense}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-regusense_dev_2026}
+      POSTGRES_DB: ${POSTGRES_DB:-regusense}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U regusense" ]
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-regusense}" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -37,16 +42,20 @@ services:
     image: neo4j:5-community
     container_name: regusense_neo4j
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
-      NEO4J_AUTH: neo4j/regusense_dev
+      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-regusense_dev}
       NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: 1g
     ports:
-      - "7474:7474" # Browser UI
-      - "7687:7687" # Bolt protocol
+      - "7474:7474"   # Neo4j Browser UI
+      - "7687:7687"   # Bolt protokolü
     volumes:
       - neo4j_data:/data
     healthcheck:
-      test: [ "CMD", "cypher-shell", "-u", "neo4j", "-p", "regusense_dev", "RETURN 1" ]
+      test: [ "CMD", "cypher-shell", "-u", "${NEO4J_USER:-neo4j}", "-p", "${NEO4J_PASSWORD:-regusense_dev}", "RETURN 1" ]
       interval: 30s
       timeout: 10s
       retries: 5

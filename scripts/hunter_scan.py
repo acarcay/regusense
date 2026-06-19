@@ -23,7 +23,10 @@ sys.path.append(str(PROJECT_ROOT))
 import asyncio
 import logging
 import re
-import spacy
+try:
+    import spacy  # type: ignore[import-untyped]
+except ImportError:
+    spacy = None  # type: ignore[assignment]
 from typing import Optional, Any, Union, Dict, List, Tuple, Set
 from dataclasses import dataclass, field
 
@@ -59,6 +62,10 @@ STRICT_SUFFIXES = {"holding", "inşaat", "aş", "a.ş", "limited", "şirketi", "
 # Dynamic ambiguous keywords (loaded from Neo4j at runtime)
 DYNAMIC_AMBIGUOUS_KEYWORDS: set[str] = set()
 
+# Combined ambiguous keywords (static + dynamic, updated at runtime)
+# This is used by is_valid_match() function
+AMBIGUOUS_KEYWORDS: set[str] = STATIC_AMBIGUOUS_KEYWORDS.copy()
+
 # NLP Models for cascade processing
 nlp_heavy = None  # Transformer model (expensive)
 nlp_light = None  # Small model (cheap) - placeholder for future
@@ -67,19 +74,20 @@ nlp_light = None  # Small model (cheap) - placeholder for future
 KNOWN_POLITICIANS = set()
 
 # Load Spacy Transformer model (Heavy - L2)
-try:
-    nlp_heavy = spacy.load("tr_core_news_trf")
-    logger.info("Spacy Turkish Transformer model loaded (L2 Heavy)")
-except Exception as e:
-    logger.warning(f"Failed to load Heavy NER model: {e}. L2 disabled.")
-    nlp_heavy = None
+if spacy is not None:
+    try:
+        nlp_heavy = spacy.load("tr_core_news_trf")
+        logger.info("Spacy Turkish Transformer model loaded (L2 Heavy)")
+    except Exception as e:
+        logger.warning(f"Failed to load Heavy NER model: {e}. L2 disabled.")
+        nlp_heavy = None
 
-# Load Spacy Small model (Light - L1) - optional
-try:
-    nlp_light = spacy.load("tr_core_news_sm")
-    logger.info("Spacy Turkish Small model loaded (L1 Light)")
-except Exception:
-    nlp_light = None  # Will use heuristics only in L1
+    # Load Spacy Small model (Light - L1) - optional
+    try:
+        nlp_light = spacy.load("tr_core_news_sm")
+        logger.info("Spacy Turkish Small model loaded (L1 Light)")
+    except Exception:
+        nlp_light = None  # Will use heuristics only in L1
 
 async def load_politicians():
     """Load all politician names into the global cache."""
@@ -193,14 +201,14 @@ def is_valid_match(text: str, match: re.Match, speaker_name: str = "") -> bool:
             return False
 
     # 4. Spacy NER Fallback
-    if nlp:
+    if nlp_heavy:
         try:
             window_start = max(0, start - 50)
             window_end = min(len(text), end + 50)
             window_text = text[window_start:window_end]
             rel_start = start - window_start
             rel_end = end - window_start
-            doc = nlp(window_text)
+            doc = nlp_heavy(window_text)
             for ent in doc.ents:
                 if ent.start_char <= rel_start and ent.end_char >= rel_end:
                     if ent.label_ == "PERSON":
@@ -279,7 +287,7 @@ async def create_mentioned_by_relationship(
         await neo4j_client.run_write(cypher, {
             "statement_id": statement_pg_id,
             "text": statement_text,
-            "date": statement_date.isoformat() if hasattr(statement_date, 'isoformat') else str(statement_date),
+            "date": statement_date.isoformat() if hasattr(statement_date, 'isoformat') else statement_date,
             "mersis": company_mersis,
             "keyword": matched_keyword,
             "speaker_id": speaker_pg_id,
@@ -356,11 +364,12 @@ async def run_hunter_scan(
         return
     
     # Load dynamic ambiguous keywords from Neo4j (replaces static list)
-    global DYNAMIC_AMBIGUOUS_KEYWORDS
+    global DYNAMIC_AMBIGUOUS_KEYWORDS, AMBIGUOUS_KEYWORDS
     DYNAMIC_AMBIGUOUS_KEYWORDS = await neo4j_client.get_dynamic_ambiguous_keywords()
-    # Union with static fallback for safety
+    # Union with static fallback for safety and update global set for is_valid_match()
     all_ambiguous = DYNAMIC_AMBIGUOUS_KEYWORDS | STATIC_AMBIGUOUS_KEYWORDS
-    logger.info(f"Ambiguous keywords: {len(all_ambiguous)} (dynamic: {len(DYNAMIC_AMBIGUOUS_KEYWORDS)})")
+    AMBIGUOUS_KEYWORDS = all_ambiguous  # Inject into global for is_valid_match()
+    logger.info(f"🔄 Ambiguous keywords injected: {len(all_ambiguous)} total (dynamic: {len(DYNAMIC_AMBIGUOUS_KEYWORDS)}, static: {len(STATIC_AMBIGUOUS_KEYWORDS)})")
     
     # Initialize Cascade Processor
     cascade = CascadeProcessor(
@@ -429,21 +438,21 @@ async def run_hunter_scan(
                     if cr.decision == MatchResult.CLEAR_ORG:
                         # Definite company mention
                         stats.matches_found += 1
-                        stats.unique_companies_mentioned.add(cr.mersis_no)
+                        stats.unique_companies_mentioned.add(cr.mersis_no or "")
                         stats.speakers_with_mentions.add(speaker.id)
                         
-                        speaker_names[speaker.id] = speaker.name
-                        company_names[cr.mersis_no] = cr.company_name
+                        speaker_names[speaker.id] = speaker.name or ""
+                        company_names[cr.mersis_no or ""] = cr.company_name or ""
                         
-                        key = (speaker.id, cr.mersis_no)
+                        key: tuple[int, str] = (speaker.id, cr.mersis_no or "")
                         speaker_company_counts[key] = speaker_company_counts.get(key, 0) + 1
                         
-                        # Phase 8: Intent Classification
+                        # Phase 8: Intent Classification with Noise Filter
                         if intent_classifier:
                             try:
                                 intent_result = intent_classifier.classify(
                                     statement=statement.text,
-                                    company_name=cr.company_name,
+                                    company_name=cr.company_name or "",
                                     speaker_party=getattr(speaker, 'party', None),
                                 )
                                 
@@ -451,63 +460,50 @@ async def run_hunter_scan(
                                     stats.criticize_count += 1
                                     await neo4j_client.create_criticized_relationship(
                                         speaker_id=speaker.id,
-                                        org_mersis=cr.mersis_no,
+                                        org_mersis=cr.mersis_no or "",
                                         statement_id=statement.id,
                                         confidence=intent_result.confidence,
                                         key_triggers=intent_result.key_triggers,
                                     )
+                                    logger.debug(f"❌ CRITICIZED: {speaker.name} → {cr.company_name}")
+                                    
                                 elif intent_result.intent == PoliticalIntent.ADVOCATE:
                                     stats.advocate_count += 1
                                     if intent_result.is_conflict_candidate:
                                         stats.conflict_candidates += 1
+                                        logger.info(f"⚠️ CONFLICT CANDIDATE: {speaker.name} ({getattr(speaker, 'party', '?')}) → {cr.company_name}")
                                     await neo4j_client.create_advocated_relationship(
                                         speaker_id=speaker.id,
-                                        org_mersis=cr.mersis_no,
+                                        org_mersis=cr.mersis_no or "",
                                         statement_id=statement.id,
                                         confidence=intent_result.confidence,
                                         is_conflict_candidate=intent_result.is_conflict_candidate,
                                         key_triggers=intent_result.key_triggers,
                                     )
+                                    logger.debug(f"✅ ADVOCATED: {speaker.name} → {cr.company_name}")
+                                    
                                 else:
-                                    # NEUTRAL - fall back to legacy MENTIONED_BY
+                                    # NEUTRAL = NOISE FILTER - Skip relationship creation
+                                    # This prevents cluttering the graph with procedural mentions
                                     stats.neutral_count += 1
-                                    await create_mentioned_by_relationship(
-                                        statement.id,
-                                        statement.text,
-                                        statement.date,
-                                        cr.mersis_no,
-                                        cr.keyword,
-                                        speaker.id,
-                                    )
+                                    logger.debug(f"⚪ NEUTRAL (filtered): {speaker.name} mentioned {cr.company_name}")
+                                    # DO NOT create MENTIONED_BY - this is the noise filter
+                                    
                             except Exception as e:
                                 logger.debug(f"Intent classification failed: {e}")
-                                # Fallback to MENTIONED_BY
-                                await create_mentioned_by_relationship(
-                                    statement.id,
-                                    statement.text,
-                                    statement.date,
-                                    cr.mersis_no,
-                                    cr.keyword,
-                                    speaker.id,
-                                )
+                                # On error, skip rather than create noisy MENTIONED_BY
+                                stats.neutral_count += 1
                         else:
-                            # No intent classifier - use legacy MENTIONED_BY
-                            await create_mentioned_by_relationship(
-                                statement.id,
-                                statement.text,
-                                statement.date,
-                                cr.mersis_no,
-                                cr.keyword,
-                                speaker.id,
-                            )
+                            # No intent classifier available - log warning and skip
+                            logger.warning(f"Intent classifier unavailable, skipping: {cr.company_name}")
                     elif cr.decision == MatchResult.CONFLICT:
                         # Needs HITL review - create pending with special flag
                         logger.debug(f"HITL Queue: {cr.keyword} in statement {statement.id} ({cr.method})")
                         # Track for pending connection creation later
-                        speaker_names[speaker.id] = speaker.name
-                        company_names[cr.mersis_no] = cr.company_name
-                        key = (speaker.id, cr.mersis_no)
-                        speaker_company_counts[key] = speaker_company_counts.get(key, 0) + 1
+                        speaker_names[speaker.id] = speaker.name or ""
+                        company_names[cr.mersis_no or ""] = cr.company_name or ""
+                        key2: tuple[int, str] = (speaker.id, cr.mersis_no or "")
+                        speaker_company_counts[key2] = speaker_company_counts.get(key2, 0) + 1
             
             offset += batch_size
             

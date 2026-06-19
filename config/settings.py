@@ -74,7 +74,7 @@ settings: Final[Settings] = Settings()
 # =============================================================================
 # Maps internal Commission Keys to specific TBMM Commission Transcript Page URLs.
 
-COMMISSION_SOURCES: Final[dict[str, dict[str, str]]] = {
+COMMISSION_SOURCES: Final[dict[str, dict[str, list[str] | str]]] = {
     # =========================================================================
     # PRIMARY COMMISSIONS (Most Relevant for Political Analysis)
     # =========================================================================
@@ -287,7 +287,7 @@ DEFAULT_COMMISSION: Final[str] = "ADALET"
 def get_commission_url(key: str) -> str:
     """Get commission URL by key, with fallback to default."""
     commission = COMMISSION_SOURCES.get(key.upper(), COMMISSION_SOURCES[DEFAULT_COMMISSION])
-    return commission["url"]
+    return str(commission["url"])
 
 
 # Helper function to get all commission keys
@@ -298,6 +298,6 @@ def get_all_commissions() -> list[str]:
 
 # Legacy compatibility alias
 COMMISSION_URLS: Final[dict[str, str]] = {
-    key.lower(): info["url"] for key, info in COMMISSION_SOURCES.items()
+    key.lower(): str(info["url"]) for key, info in COMMISSION_SOURCES.items()
 }
 

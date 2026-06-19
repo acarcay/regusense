@@ -77,7 +77,7 @@ class ReportGenerator:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
-        self.pdf: Optional[FPDF] = None
+        self.pdf: Any = None
         self.report_data: dict = {}
         
     def _init_pdf(self) -> None:

@@ -5,7 +5,13 @@ Fetches high-quality images for speaker profiles.
 
 import logging
 from typing import Optional
-from duckduckgo_search import DDGS
+
+try:
+    from duckduckgo_search import DDGS  # type: ignore[import-untyped]
+    _DDGS_AVAILABLE = True
+except ImportError:
+    DDGS = None  # type: ignore[assignment,misc]
+    _DDGS_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +20,9 @@ def get_speaker_image(query: str) -> Optional[str]:
     Search for a speaker's image.
     Returns the URL of the first result or None.
     """
+    if not _DDGS_AVAILABLE or DDGS is None:
+        logger.warning("duckduckgo_search not installed. Cannot fetch speaker image.")
+        return None
     try:
         # Append "portre" or "siyasetçi" to get better results
         search_query = f"{query} siyasetçi portre high resolution"

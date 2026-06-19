@@ -239,9 +239,9 @@ class VideoScriptGenerator:
 
 
 # Convenience Functions
-def generate_social_banner(result: Dict[str, Any]) -> Path:
+async def generate_social_banner(result: Dict[str, Any]) -> Path:
     generator = HTMLBannerGenerator()
-    return generator.generate(result)
+    return await generator.generate(result)
 
 def generate_video_script(result: Dict[str, Any], output_dir: str = "data/videos") -> Tuple[VideoScript, Path]:
     generator = VideoScriptGenerator(output_dir)

@@ -304,16 +304,25 @@ Bu iki açıklama arasındaki tutarsızlığı analiz et.
 Sadece JSON döndür, başka bir şey yazma."""
 
         try:
-            response = self.analyzer._generate_with_retry(prompt)
+            # Call Gemini model directly
+            response = self.analyzer.model.generate_content(prompt)
             
             # Parse JSON from response
             import json
             import re
             
-            # Extract JSON block
-            json_match = re.search(r'\{[\s\S]*\}', response)
-            if json_match:
-                return json.loads(json_match.group())
+            # Extract and clean JSON
+            text = response.text.strip()
+            if text.startswith("```json"):
+                text = text[7:]
+            if text.startswith("```"):
+                text = text[3:]
+            if text.endswith("```"):
+                text = text[:-3]
+            text = text.strip()
+            
+            # Parse JSON
+            return json.loads(text)
             
         except Exception as e:
             logger.error(f"LLM analysis failed: {e}")

@@ -22,6 +22,7 @@ class SourceType(str, Enum):
     EKAP = "EKAP"  # KİK Tender Platform
     TUIK_TSG = "TUIK_TSG"  # TÜİK Ticaret Sicil
     TOBB = "TOBB"  # TOBB Ticaret Sicil Gazetesi
+    YOUTUBE = "YOUTUBE"
     UNKNOWN = "UNKNOWN"
 
 

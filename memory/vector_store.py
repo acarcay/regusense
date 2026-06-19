@@ -116,7 +116,11 @@ class PoliticalMemory:
         
         # Initialize embedding model
         logger.info(f"Loading embedding model: {model_name}")
+        print(f"\n🔄 Model yükleniyor: {model_name}")
+        print("   İlk çalıştırmada model dosyaları indirilecek (~200 MB)")
+        print("   Bu işlem 1-2 dakika sürebilir, lütfen bekleyin...\n")
         self._model = SentenceTransformer(model_name)
+        print("✅ Model başarıyla yüklendi!\n")
         
         # Initialize ChromaDB client with persistence
         logger.info(f"Initializing ChromaDB at: {self.persist_dir}")
@@ -264,11 +268,11 @@ class PoliticalMemory:
             })
         
         if ids:
-            self._collection.add(
+            self._collection.add(  # type: ignore[call-overload]
                 ids=ids,
-                embeddings=embeddings,
+                embeddings=embeddings,  # type: ignore[arg-type]
                 documents=documents,
-                metadatas=metadatas,
+                metadatas=metadatas,  # type: ignore[arg-type]
             )
             logger.info(f"Batch ingested {len(ids)} documents")
             
@@ -333,7 +337,7 @@ class PoliticalMemory:
         results = self._collection.query(
             query_embeddings=[query_embedding],
             n_results=min(top_k, self._collection.count() or 1),
-            where=where_filter,
+            where=where_filter,  # type: ignore[arg-type]
             include=["documents", "metadatas", "distances"],
         )
         
@@ -351,12 +355,12 @@ class PoliticalMemory:
                 
                 matches.append(StatementMatch(
                     text=doc,
-                    speaker=metadata.get("speaker", ""),
-                    date=metadata.get("date", ""),
-                    topic=metadata.get("topic", ""),
-                    source=metadata.get("source", ""),
-                    source_type=metadata.get("source_type", "UNKNOWN"),
-                    page_number=int(metadata.get("page_number", 0)),
+                    speaker=str(metadata.get("speaker") or ""),
+                    date=str(metadata.get("date") or ""),
+                    topic=str(metadata.get("topic") or ""),
+                    source=str(metadata.get("source") or ""),
+                    source_type=str(metadata.get("source_type") or "UNKNOWN"),
+                    page_number=int(metadata.get("page_number") or 0),  # type: ignore[arg-type]
                     similarity=similarity,
                     document_id=doc_id,
                 ))
@@ -411,7 +415,7 @@ class PoliticalMemory:
                 results = self._collection.get(include=["metadatas"])
                 if results and results.get("metadatas"):
                     for metadata in results["metadatas"]:
-                        speaker = metadata.get("speaker", "")
+                        speaker = str(metadata.get("speaker") or "")
                         if speaker and speaker.strip():
                             speakers.add(speaker.strip())
             else:
@@ -427,7 +431,7 @@ class PoliticalMemory:
                     if not results or not results.get("metadatas"):
                         break
                     for metadata in results["metadatas"]:
-                        speaker = metadata.get("speaker", "")
+                        speaker = str(metadata.get("speaker") or "")
                         if speaker and speaker.strip():
                             speakers.add(speaker.strip())
                     offset += chunk_size

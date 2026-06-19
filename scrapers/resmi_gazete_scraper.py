@@ -22,6 +22,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, List
 from urllib.parse import urljoin
+from sqlalchemy.exc import IntegrityError
+
+from database.postgres_client import get_session
+from database.models import RawDocument, DocumentType
 
 from scrapers.base import BaseScraper, RateLimiter, ProxyManager
 from scrapers.models import ScrapedStatement, ScrapeResult, SourceType
@@ -108,7 +112,7 @@ class ResmiGazeteScraper(BaseScraper):
                         text = await section.inner_text()
                         text = text.strip()
                         
-                        if len(text) < 100:
+                        if len(text) < 50:
                             continue
                         
                         # Try to extract title
@@ -117,31 +121,24 @@ class ResmiGazeteScraper(BaseScraper):
                         if h_elem:
                             title = await h_elem.inner_text()
                         
-                        statements.append(ScrapedStatement(
-                            text=text[:10000],  # Limit length
-                            topic=title.strip() if title else "Resmi Gazete",
-                            date=date.strftime("%Y-%m-%d"),
-                            source=url,
-                            source_type=SourceType.RESMI_GAZETE,
-                        ))
+                        # Filter for specific topics: Atamalar, İhaleler
+                        topic = title.strip() if title else "Resmi Gazete"
+                        is_relevant = any(kw in topic.upper() or kw in text.upper() for kw in [
+                            "ATAMA", "İHALE", "İLAN", "KARARNAME", "GÖREVDEN ALINMA"
+                        ])
                         
-                    except Exception as e:
-                        logger.debug(f"Failed to parse section: {e}")
-                        continue
-                
-                # Alternative: Get all main content
-                if not statements:
-                    main_content = await page.query_selector("#main, .main-content, body")
-                    if main_content:
-                        text = await main_content.inner_text()
-                        if len(text) > 500:
+                        if is_relevant:
                             statements.append(ScrapedStatement(
-                                text=text[:20000],
-                                topic="Resmi Gazete",
+                                text=text[:10000],  # Limit length
+                                topic=topic,
                                 date=date.strftime("%Y-%m-%d"),
                                 source=url,
                                 source_type=SourceType.RESMI_GAZETE,
                             ))
+                        
+                    except Exception as e:
+                        logger.debug(f"Failed to parse section: {e}")
+                        continue
                 
             except Exception as e:
                 logger.warning(f"Failed to scrape {date_str}: {e}")
@@ -180,31 +177,43 @@ class ResmiGazeteScraper(BaseScraper):
                 logger.info(f"Scraped {date.strftime('%Y-%m-%d')}: {len(statements)} items")
                 await asyncio.sleep(1)  # Rate limit
             
-            # Save to JSON
+            # Save to PostgreSQL RawDocument
+            items_saved = 0
             if all_statements:
-                output_file = self.output_dir / f"resmi_gazete_{datetime.now().strftime('%Y%m%d')}.json"
-                with open(output_file, "w", encoding="utf-8") as f:
-                    json.dump(
-                        [s.model_dump() for s in all_statements],
-                        f,
-                        ensure_ascii=False,
-                        indent=2,
-                    )
-            
-            # Ingest to vector store
-            ingested = 0
-            if ingest_to_memory and all_statements:
-                ingested = await self._ingest_statements(all_statements)
+                async with get_session() as session:
+                    for s in all_statements:
+                        try:
+                            content_hash = RawDocument.compute_hash(s.text)
+                            doc = RawDocument(
+                                doc_type=DocumentType.RESMI_GAZETE.value,
+                                title=s.topic,
+                                source_url=s.source,
+                                raw_text=s.text,
+                                content_hash=content_hash,
+                                session_id=None,
+                                date=s.date,
+                                metadata_json=s.model_dump(),
+                                processing_status="pending",
+                            )
+                            session.add(doc)
+                            await session.flush()
+                            items_saved += 1
+                        except IntegrityError:
+                            await session.rollback()
+                            logger.debug("Duplicate Resmi Gazete document skipped.")
+                        except Exception as e:
+                            await session.rollback()
+                            logger.error(f"Failed to save Resmi Gazete doc: {e}")
             
             duration = (datetime.now() - start_time).total_seconds()
             
             return ScrapeResult(
                 success=True,
                 items_found=len(all_statements),
-                items_saved=len(all_statements),
-                items_ingested=ingested,
+                items_saved=items_saved,
+                items_ingested=items_saved, # Backwards compatibility
                 duration_seconds=duration,
-                saved_path=str(self.output_dir),
+                saved_path="PostgreSQL: RawDocument",
             )
             
         except Exception as e:

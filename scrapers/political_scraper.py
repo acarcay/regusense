@@ -167,8 +167,8 @@ class NewsScraper:
                 items.append(NewsItem(
                     title=title,
                     source=source_name,
-                    date=pubdate_elem.text if pubdate_elem is not None else "",
-                    url=link_elem.text if link_elem is not None else "",
+                    date=pubdate_elem.text if pubdate_elem is not None and pubdate_elem.text is not None else "",
+                    url=link_elem.text if link_elem is not None and link_elem.text is not None else "",
                     speaker=speaker,
                 ))
                 

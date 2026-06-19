@@ -327,7 +327,7 @@ class BaseScraper(ABC):
         self._context = await self._browser.new_context(
             user_agent=self.ua_rotator.get_random(),
             viewport={"width": 1920, "height": 1080},
-            proxy=proxy,
+            proxy=proxy,  # type: ignore
         )
         
         logger.info("Browser started")
@@ -397,7 +397,9 @@ class BaseScraper(ABC):
                 
                 await asyncio.sleep(wait_time)
         
-        raise last_error
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("Operation failed after max retries")
     
     @abstractmethod
     async def scrape(self, *args, **kwargs) -> Any:

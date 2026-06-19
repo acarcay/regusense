@@ -203,3 +203,147 @@ def format_conflict_report(conflicts: list[dict]) -> str:
         ])
     
     return "\n".join(lines)
+
+
+# =============================================================================
+# Temporal Conflict Analysis (Module 4: The Smoking Gun)
+# =============================================================================
+
+@dataclass
+class TemporalConflict:
+    """
+    A temporal conflict between tender award date and political advocacy.
+    
+    This is the "smoking gun" - if a politician advocates for a company
+    within ±15 days of that company winning a tender, it's highly suspicious.
+    """
+    politician: str
+    politician_party: Optional[str]
+    organization: str
+    organization_mersis: str
+    tender_ikn: Optional[str]
+    tender_date: date
+    advocacy_date: date
+    days_difference: int
+    risk_level: str  # "CRITICAL" (±3 days) | "HIGH" (±7 days) | "MEDIUM" (±15 days)
+    statement_id: Optional[int] = None
+    confidence: float = 0.0
+    
+    def to_dict(self) -> dict:
+        return {
+            "politician": self.politician,
+            "politician_party": self.politician_party,
+            "organization": self.organization,
+            "organization_mersis": self.organization_mersis,
+            "tender_ikn": self.tender_ikn,
+            "tender_date": self.tender_date.isoformat() if isinstance(self.tender_date, date) else str(self.tender_date),
+            "advocacy_date": self.advocacy_date.isoformat() if isinstance(self.advocacy_date, date) else str(self.advocacy_date),
+            "days_difference": self.days_difference,
+            "risk_level": self.risk_level,
+            "statement_id": self.statement_id,
+            "confidence": self.confidence,
+        }
+
+
+def classify_temporal_risk(days_diff: int) -> str:
+    """Classify risk level based on days difference."""
+    abs_diff = abs(days_diff)
+    if abs_diff <= 3:
+        return "CRITICAL"
+    elif abs_diff <= 7:
+        return "HIGH"
+    else:
+        return "MEDIUM"
+
+
+async def detect_temporal_conflicts(
+    org_mersis: str,
+    tender_date: date,
+    window_days: int = 15,
+) -> list[TemporalConflict]:
+    """
+    Detect temporal conflicts between a tender and political advocacy.
+    
+    The "Smoking Gun" detector: if a politician advocated for a company
+    within ±window_days of that company winning a tender, flag it.
+    
+    Args:
+        org_mersis: Company MERSIS number
+        tender_date: Date the tender was awarded
+        window_days: Days before/after to search (default: 15)
+        
+    Returns:
+        List of TemporalConflict objects
+    """
+    from database import neo4j_client
+    
+    tender_date_str = tender_date.isoformat() if isinstance(tender_date, date) else str(tender_date)
+    
+    try:
+        results = await neo4j_client.find_temporal_conflicts(
+            org_mersis=org_mersis,
+            tender_date=tender_date_str,
+            window_days=window_days,
+        )
+        
+        conflicts = []
+        for r in results:
+            try:
+                advocacy_dt = date.fromisoformat(r.get("advocacy_date", ""))
+            except (ValueError, TypeError):
+                advocacy_dt = tender_date
+            
+            conflict = TemporalConflict(
+                politician=r.get("politician_name", "Unknown"),
+                politician_party=r.get("party"),
+                organization=r.get("company_name", "Unknown"),
+                organization_mersis=org_mersis,
+                tender_ikn=None,  # Not available in single-tender query
+                tender_date=tender_date,
+                advocacy_date=advocacy_dt,
+                days_difference=r.get("days_difference", 0),
+                risk_level=classify_temporal_risk(r.get("days_difference", 0)),
+                statement_id=r.get("statement_id"),
+                confidence=r.get("confidence", 0.0),
+            )
+            conflicts.append(conflict)
+            
+            # Log critical findings
+            if conflict.risk_level == "CRITICAL":
+                logger.warning(
+                    f"🔥 CRITICAL TEMPORAL CONFLICT: {conflict.politician} ({conflict.politician_party}) "
+                    f"advocated for {conflict.organization} {abs(conflict.days_difference)} days "
+                    f"{'before' if conflict.days_difference < 0 else 'after'} tender award!"
+                )
+        
+        return conflicts
+        
+    except Exception as e:
+        logger.error(f"Temporal conflict detection failed: {e}")
+        return []
+
+
+def format_temporal_conflicts_report(conflicts: list[TemporalConflict]) -> str:
+    """Format temporal conflicts for human review."""
+    if not conflicts:
+        return "Zaman çizelgesi çakışması bulunamadı."
+    
+    lines = ["## 🔥 Zaman Çizelgesi Çakışmaları (İhale-Savunuculuk)", ""]
+    
+    for i, c in enumerate(conflicts, 1):
+        emoji = "🚨" if c.risk_level == "CRITICAL" else ("🔴" if c.risk_level == "HIGH" else "🟠")
+        direction = "ÖNCE" if c.days_difference < 0 else "SONRA"
+        
+        lines.extend([
+            f"### {emoji} {c.risk_level} RİSK - Çakışma {i}",
+            f"- **Siyasetçi:** {c.politician} ({c.politician_party or 'Parti bilinmiyor'})",
+            f"- **Şirket:** {c.organization}",
+            f"- **İhale Tarihi:** {c.tender_date}",
+            f"- **Savunuculuk Tarihi:** {c.advocacy_date}",
+            f"- **Fark:** {abs(c.days_difference)} gün {direction}",
+            f"- **Güven Skoru:** {c.confidence:.2f}",
+            "",
+        ])
+    
+    return "\n".join(lines)
+

@@ -7,7 +7,7 @@ Defines the core data models:
 - Source: Data sources (commissions, social media, etc.)
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 import hashlib
 import unicodedata
@@ -95,8 +95,8 @@ class Speaker(Base):
     normalized_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     party: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     
     # Relationships
     statements: Mapped[List["Statement"]] = relationship("Statement", back_populates="speaker")
@@ -115,7 +115,7 @@ class Source(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     source_type: Mapped[str] = mapped_column(String(50), nullable=False)  # TBMM_COMMISSION, SOCIAL_MEDIA, TV_INTERVIEW
     url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     
     # Relationships
     statements: Mapped[List["Statement"]] = relationship("Statement", back_populates="source")
@@ -151,7 +151,7 @@ class Statement(Base):
     chroma_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     
     # Timestamps
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     
     # Relationships
     speaker: Mapped["Speaker"] = relationship("Speaker", back_populates="statements")
@@ -165,3 +165,186 @@ class Statement(Base):
     
     def __repr__(self) -> str:
         return f"<Statement(id={self.id}, speaker_id={self.speaker_id}, date='{self.date}')>"
+
+
+# =============================================================================
+# RawDocument – Ham Belgeler (TBMM Tutanağı, Sayıştay Raporu, vb.)
+# =============================================================================
+
+import enum as _enum
+
+
+class DocumentStatus(str, _enum.Enum):
+    """Ham belge işleme durumu."""
+    PENDING    = "pending"     # Henüz işlenmedi
+    PROCESSING = "processing"  # Aktif olarak işleniyor
+    DONE       = "done"        # İşleme tamamlandı
+    FAILED     = "failed"      # İşleme başarısız oldu
+    SKIPPED    = "skipped"     # Kasıtlı olarak atlandı
+
+
+class DocumentType(str, _enum.Enum):
+    """
+    Belge kaynak tipi.
+
+    TBMM_TRANSCRIPT  : Genel Kurul veya Komisyon tutanakları
+    SAYISTAY_REPORT  : Sayıştay denetim raporları
+    EKAP_TENDER      : EKAP ihale ilanı / sonucu
+    SOCIAL_MEDIA     : Twitter/X paylaşımı
+    TV_INTERVIEW     : Televizyon röportajı transkripsiyonu
+    PRESS_RELEASE    : Basın bülteni
+    OTHER            : Sınıflandırılamamış belge
+    """
+    TBMM_TRANSCRIPT = "TBMM_TRANSCRIPT"
+    SAYISTAY_REPORT  = "SAYISTAY_REPORT"
+    EKAP_TENDER      = "EKAP_TENDER"
+    RESMI_GAZETE     = "RESMI_GAZETE"
+    SOCIAL_MEDIA     = "SOCIAL_MEDIA"
+    TV_INTERVIEW     = "TV_INTERVIEW"
+    PRESS_RELEASE    = "PRESS_RELEASE"
+    OTHER            = "OTHER"
+
+
+class RawDocument(Base):
+    """
+    Ham belge deposu.
+
+    Pipeline'a giren her belge önce buraya kaydedilir; ardından işlenerek
+    ``Statement`` satırlarına ve Neo4j düğümlerine dönüştürülür.
+
+    Sütunlar:
+        id                – Otomatik artan birincil anahtar
+        doc_type          – Belge tipi (DocumentType enum değeri)
+        title             – Belge başlığı (opsiyonel)
+        source_url        – Ham belgenin URL'si (opsiyonel)
+        file_path         – Sunucudaki yerel dosya yolu (opsiyonel)
+        raw_text          – Ham metin içeriği
+        content_hash      – SHA-256(raw_text) – yinelenen belge kontrolü
+        session_id        – TBMM oturum no, EKAP IKN vb. (opsiyonel)
+        date              – Belge tarihi YYYY-MM-DD (opsiyonel)
+        processing_status – pending | processing | done | failed | skipped
+        error_message     – Hata mesajı (başarısız olduğunda)
+        metadata_json     – Ek yapılandırılmamış meta veri (JSONB)
+        created_at        – Kayıt oluşturulma zamanı
+        processed_at      – İşleme tamamlanma zamanı (opsiyonel)
+    """
+    __tablename__ = "raw_documents"
+
+    id: Mapped[int] = mapped_column(
+        primary_key=True, autoincrement=True
+    )
+
+    # ── Belge türü & kimlik ────────────────────────────────────────────────────
+    doc_type: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default=DocumentType.OTHER.value,
+        index=True,
+        comment="Belge tipi: TBMM_TRANSCRIPT | SAYISTAY_REPORT | EKAP_TENDER | ...",
+    )
+    title: Mapped[Optional[str]] = mapped_column(
+        String(512),
+        nullable=True,
+        comment="Belge başlığı veya konu satırı",
+    )
+
+    # ── Kaynak konum ───────────────────────────────────────────────────────────
+    source_url: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Ham belgenin indirildiği veya yayımlandığı URL",
+    )
+    file_path: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Sunucudaki yerel dosya yolu (PDF, TXT vb.)",
+    )
+
+    # ── İçerik ────────────────────────────────────────────────────────────────
+    raw_text: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        comment="Ham metin – hiçbir ön-işlem uygulanmamış",
+    )
+    content_hash: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        unique=True,
+        index=True,
+        comment="SHA-256(raw_text) – yinelenen belge girişini engeller",
+    )
+
+    # ── Bağlam ────────────────────────────────────────────────────────────────
+    session_id: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+        index=True,
+        comment="TBMM oturum numarası, EKAP IKN'si vb.",
+    )
+    date: Mapped[Optional[str]] = mapped_column(
+        String(20),
+        nullable=True,
+        index=True,
+        comment="Belge tarihi – YYYY-MM-DD formatı",
+    )
+
+    # ── İşleme durumu ─────────────────────────────────────────────────────────
+    processing_status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default=DocumentStatus.PENDING.value,
+        index=True,
+        comment="pending | processing | done | failed | skipped",
+    )
+    error_message: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        comment="İşleme sırasında oluşan hata mesajı",
+    )
+
+    # ── Ek meta veri ──────────────────────────────────────────────────────────
+    metadata_json: Mapped[Optional[dict]] = mapped_column(
+        JSON,
+        nullable=True,
+        comment="Yapılandırılmamış ek meta veri (JSONB olarak saklanır)",
+    )
+
+    # ── Zaman damgaları ───────────────────────────────────────────────────────
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    processed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime,
+        nullable=True,
+        comment="İşleme tamamlandığında set edilir",
+    )
+
+    # ── Bileşik indeksler ─────────────────────────────────────────────────────
+    __table_args__ = (
+        Index("ix_raw_documents_type_status", "doc_type", "processing_status"),
+        Index("ix_raw_documents_date", "date"),
+    )
+
+    # ── Yardımcı metotlar ─────────────────────────────────────────────────────
+    @staticmethod
+    def compute_hash(text: str) -> str:
+        """Ham metin için SHA-256 hash üretir."""
+        import hashlib
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    def mark_done(self) -> None:
+        """Belgeyi başarıyla işlenmiş olarak işaretle."""
+        self.processing_status = DocumentStatus.DONE.value
+        self.processed_at = datetime.now(timezone.utc)
+
+    def mark_failed(self, error: str) -> None:
+        """Belgeyi başarısız olarak işaretle ve hatayı kaydet."""
+        self.processing_status = DocumentStatus.FAILED.value
+        self.error_message = error
+        self.processed_at = datetime.now(timezone.utc)
+
+    def __repr__(self) -> str:
+        return (
+            f"<RawDocument(id={self.id}, type='{self.doc_type}', "
+            f"status='{self.processing_status}', date='{self.date}')>"
+        )

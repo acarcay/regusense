@@ -51,7 +51,7 @@ def analyze_chromadb(persist_dir: str = "data/chromadb") -> dict:
     
     # Initialize ChromaDB client
     client = chromadb.PersistentClient(
-        path=str(persist_dir),
+        path=persist_dir,
         settings=ChromaSettings(anonymized_telemetry=False),
     )
     
@@ -93,12 +93,12 @@ def analyze_chromadb(persist_dir: str = "data/chromadb") -> dict:
             text = results["documents"][i] if results["documents"] else ""
             metadata = results["metadatas"][i] if results["metadatas"] else {}
             
-            speaker = metadata.get("speaker", "")
-            date = metadata.get("date", "")
-            source_type = metadata.get("source_type", "UNKNOWN")
+            speaker = metadata.get("speaker") or ""
+            date = metadata.get("date") or ""
+            source_type = metadata.get("source_type") or "UNKNOWN"
             
             # Generate content hash
-            content_hash = generate_content_hash(text, speaker, date)
+            content_hash = generate_content_hash(text, str(speaker), str(date))
             hash_to_ids[content_hash].append({
                 "id": doc_id,
                 "speaker": speaker,

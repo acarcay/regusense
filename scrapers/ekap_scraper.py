@@ -1,11 +1,13 @@
 """
-EKAP (KİK) Tender Intelligence Scraper.
+EKAP (KİK) Tender Intelligence Scraper - STEALTH MODE.
 
 Scrapes completed tender results from the Turkish Public Procurement Authority.
 URL: https://ekap.kik.gov.tr/EKAP/Ortak/IhaleArama/index.html
 
 Features:
-- Async Playwright-based scraping
+- Async Playwright-based scraping with STEALTH mode
+- Human emulation (random delays, curved mouse movements)
+- Error recovery with block type diagnosis (CAPTCHA/WAF)
 - Form-based search by company or date
 - Rate limiting (20 req/min)
 - Pydantic validation
@@ -23,13 +25,32 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 import asyncio
 import json
+import random
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Literal
 from urllib.parse import urljoin
+from enum import Enum
+from sqlalchemy.exc import IntegrityError
 
-from scrapers.base import BaseScraper, RateLimiter, ProxyManager
+from database.postgres_client import get_session
+from database.models import RawDocument, DocumentType
+
+import numpy as np
+try:
+    import bezier
+    BEZIER_AVAILABLE = True
+except ImportError:
+    BEZIER_AVAILABLE = False
+
+try:
+    from playwright_stealth import Stealth
+    STEALTH_AVAILABLE = True
+except ImportError:
+    STEALTH_AVAILABLE = False
+
+from scrapers.base import BaseScraper, RateLimiter, ProxyManager, UserAgentRotator
 from scrapers.models import TenderResult, ScrapeResult, SourceType
 from core.logging import get_logger
 
@@ -38,6 +59,160 @@ logger = get_logger(__name__)
 
 BASE_URL = "https://ekap.kik.gov.tr"
 SEARCH_URL = f"{BASE_URL}/EKAP/Ortak/IhaleArama/index.html"
+SCREENSHOT_DIR = Path("data/raw/ekap/screenshots")
+
+
+# =============================================================================
+# Block Type Detection
+# =============================================================================
+
+class BlockType(str, Enum):
+    """Type of blocking mechanism detected."""
+    CAPTCHA = "CAPTCHA"
+    WAF = "WAF"  # Web Application Firewall
+    IP_BLOCK = "IP_BLOCK"
+    RATE_LIMIT = "RATE_LIMIT"
+    UNKNOWN = "UNKNOWN"
+
+
+# =============================================================================
+# Human Emulation Utilities
+# =============================================================================
+
+async def human_delay(min_sec: float = 1.0, max_sec: float = 4.0) -> float:
+    """
+    Simulate human "thinking" time with random delay.
+    
+    Returns:
+        Actual delay time in seconds
+    """
+    delay = random.uniform(min_sec, max_sec)
+    logger.debug(f"Human delay: {delay:.2f}s")
+    await asyncio.sleep(delay)
+    return delay
+
+
+async def human_mouse_move(page, target_x: int, target_y: int, steps: int = 25) -> None:
+    """
+    Move mouse in a curved (bezier) path to simulate human movement.
+    
+    Args:
+        page: Playwright Page object
+        target_x: Target X coordinate
+        target_y: Target Y coordinate
+        steps: Number of intermediate steps
+    """
+    if not BEZIER_AVAILABLE:
+        # Fallback: direct move
+        await page.mouse.move(target_x, target_y)
+        return
+    
+    try:
+        # Get current mouse position (approximated from viewport center if unknown)
+        viewport = page.viewport_size or {"width": 1920, "height": 1080}
+        start_x = viewport["width"] // 2 + random.randint(-100, 100)
+        start_y = viewport["height"] // 2 + random.randint(-100, 100)
+        
+        # Create bezier curve control points
+        # Control point adds natural curve to movement
+        ctrl_x = (start_x + target_x) // 2 + random.randint(-50, 50)
+        ctrl_y = (start_y + target_y) // 2 + random.randint(-100, 100)
+        
+        # Define bezier curve nodes
+        nodes = np.asfortranarray([
+            [start_x, ctrl_x, target_x],
+            [start_y, ctrl_y, target_y],
+        ])
+        curve = bezier.Curve(nodes, degree=2)
+        
+        # Move along the curve
+        for i in range(steps + 1):
+            t = i / steps
+            point = curve.evaluate(t)
+            x, y = int(point[0][0]), int(point[1][0])
+            await page.mouse.move(x, y)
+            await asyncio.sleep(random.uniform(0.01, 0.03))
+        
+        logger.debug(f"Mouse move completed: ({start_x},{start_y}) → ({target_x},{target_y})")
+        
+    except Exception as e:
+        logger.warning(f"Bezier mouse move failed, using direct: {e}")
+        await page.mouse.move(target_x, target_y)
+
+
+async def diagnose_block(page) -> BlockType:
+    """
+    Analyze page content to determine type of blocking mechanism.
+    
+    Returns:
+        BlockType enum indicating the detected block type
+    """
+    try:
+        content = await page.content()
+        content_lower = content.lower()
+        
+        # CAPTCHA indicators
+        captcha_indicators = [
+            "captcha", "recaptcha", "hcaptcha", "güvenlik doğrulaması",
+            "robot değilim", "i'm not a robot", "doğrulama kodu"
+        ]
+        if any(indicator in content_lower for indicator in captcha_indicators):
+            return BlockType.CAPTCHA
+        
+        # WAF indicators (Cloudflare, Incapsula, etc.)
+        waf_indicators = [
+            "cloudflare", "incapsula", "blocked", "access denied",
+            "erişim engellendi", "web application firewall", "ddos protection"
+        ]
+        if any(indicator in content_lower for indicator in waf_indicators):
+            return BlockType.WAF
+        
+        # Rate limit indicators
+        rate_indicators = [
+            "too many requests", "rate limit", "çok fazla istek",
+            "429", "lütfen bekleyin", "please wait"
+        ]
+        if any(indicator in content_lower for indicator in rate_indicators):
+            return BlockType.RATE_LIMIT
+        
+        # IP block indicators
+        ip_indicators = [
+            "ip address", "ip adresi", "banned", "yasaklandı",
+            "permanently blocked", "kalıcı olarak engellendi"
+        ]
+        if any(indicator in content_lower for indicator in ip_indicators):
+            return BlockType.IP_BLOCK
+        
+        return BlockType.UNKNOWN
+        
+    except Exception as e:
+        logger.error(f"Block diagnosis failed: {e}")
+        return BlockType.UNKNOWN
+
+
+async def save_error_screenshot(page, error_type: str) -> Optional[Path]:
+    """
+    Save screenshot for debugging blocked/errored pages.
+    
+    Args:
+        page: Playwright Page object
+        error_type: Type of error (for filename)
+        
+    Returns:
+        Path to saved screenshot or None
+    """
+    try:
+        SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = SCREENSHOT_DIR / f"{error_type}_{timestamp}.png"
+        await page.screenshot(path=str(filename), full_page=True)
+        logger.info(f"Error screenshot saved: {filename}")
+        return filename
+    except Exception as e:
+        logger.error(f"Failed to save screenshot: {e}")
+        return None
+
+
 
 
 class EkapScraper(BaseScraper):
@@ -104,6 +279,14 @@ class EkapScraper(BaseScraper):
         
         async with self._create_page() as page:
             try:
+                # Apply stealth mode if available
+                if STEALTH_AVAILABLE:
+                    await Stealth().apply_stealth_async(page)
+                    logger.info("🥷 Stealth mode activated")
+                
+                # Human emulation: initial delay before navigation
+                await human_delay(1.0, 2.5)
+                
                 # Navigate to search page
                 async def navigate():
                     await page.goto(SEARCH_URL, wait_until="networkidle")
@@ -111,28 +294,57 @@ class EkapScraper(BaseScraper):
                 
                 await self._retry_with_backoff(navigate, "navigate to EKAP")
                 
+                # Human delay after page load
+                await human_delay(1.5, 3.0)
+                
                 # Wait for form to load
                 await page.wait_for_selector("#txtYuklenici", timeout=10000)
                 
-                # Fill contractor field
+                # Human emulation: move to input field before typing
+                input_element = await page.query_selector("#txtYuklenici")
+                if input_element:
+                    box = await input_element.bounding_box()
+                    if box:
+                        await human_mouse_move(page, int(box["x"] + box["width"] / 2), int(box["y"] + box["height"] / 2))
+                        await human_delay(0.3, 0.8)
+                
+                # Fill contractor field with human-like typing delay
                 await page.fill("#txtYuklenici", company_name)
+                await human_delay(0.5, 1.0)
                 
                 # Select "Sonuçlanmış" (Completed) status
                 status_select = await page.query_selector("#ddlIhaleDurumu")
                 if status_select:
                     await status_select.select_option(value="3")  # Completed
+                    await human_delay(0.3, 0.7)
                 
-                # Submit search
+                # Human emulation: move to search button
                 search_btn = await page.query_selector("#btnAra, button[type='submit']")
                 if search_btn:
+                    box = await search_btn.bounding_box()
+                    if box:
+                        await human_mouse_move(page, int(box["x"] + box["width"] / 2), int(box["y"] + box["height"] / 2))
+                        await human_delay(0.2, 0.5)
                     await search_btn.click()
                     await page.wait_for_load_state("networkidle")
                 
+                # Human delay after results load
+                await human_delay(1.0, 2.0)
+                
                 # Parse results
                 results = await self._parse_search_results(page, mersis_no)
+                logger.info(f"✅ Found {len(results)} tenders for {company_name}")
+                
+            except TimeoutError as e:
+                # Error recovery: diagnose block type and save screenshot
+                logger.error(f"Timeout scraping EKAP for {company_name}: {e}")
+                block_type = await diagnose_block(page)
+                logger.warning(f"🚫 Block type detected: {block_type.value}")
+                await save_error_screenshot(page, f"timeout_{block_type.value.lower()}")
                 
             except Exception as e:
                 logger.error(f"Failed to scrape EKAP for {company_name}: {e}")
+                await save_error_screenshot(page, "error")
         
         return results
     
@@ -148,24 +360,46 @@ class EkapScraper(BaseScraper):
         """
         async with self._create_page() as page:
             try:
+                # Apply stealth mode
+                if STEALTH_AVAILABLE:
+                    await Stealth().apply_stealth_async(page)
+                
+                await human_delay(1.0, 2.0)
                 await page.goto(SEARCH_URL, wait_until="networkidle")
+                await human_delay(1.0, 2.5)
                 await page.wait_for_selector("#txtIhaleKayitNumarasi", timeout=10000)
                 
-                # Fill IKN field
+                # Fill IKN field with human emulation
                 await page.fill("#txtIhaleKayitNumarasi", ikn)
+                await human_delay(0.5, 1.0)
                 
-                # Submit
+                # Submit with mouse movement
                 search_btn = await page.query_selector("#btnAra, button[type='submit']")
                 if search_btn:
+                    box = await search_btn.bounding_box()
+                    if box:
+                        await human_mouse_move(page, int(box["x"] + box["width"] / 2), int(box["y"] + box["height"] / 2))
+                        await human_delay(0.2, 0.5)
                     await search_btn.click()
                     await page.wait_for_load_state("networkidle")
                 
+                await human_delay(1.0, 2.0)
+                
                 # Parse single result
                 results = await self._parse_search_results(page)
+                logger.info(f"✅ Found tender for IKN {ikn}" if results else f"❌ No tender for IKN {ikn}")
                 return results[0] if results else None
+                
+            except TimeoutError as e:
+                logger.error(f"Timeout scraping IKN {ikn}: {e}")
+                block_type = await diagnose_block(page)
+                logger.warning(f"🚫 Block type: {block_type.value}")
+                await save_error_screenshot(page, f"ikn_timeout_{block_type.value.lower()}")
+                return None
                 
             except Exception as e:
                 logger.error(f"Failed to scrape IKN {ikn}: {e}")
+                await save_error_screenshot(page, "ikn_error")
                 return None
     
     async def scrape_latest(
@@ -189,8 +423,16 @@ class EkapScraper(BaseScraper):
         
         try:
             async with self._create_page() as page:
+                # Apply stealth mode
+                if STEALTH_AVAILABLE:
+                    await Stealth().apply_stealth_async(page)
+                    logger.info("🥷 Stealth mode activated for latest scan")
+                
+                await human_delay(1.0, 2.5)
+                
                 # Navigate to search page
                 await page.goto(SEARCH_URL, wait_until="networkidle")
+                await human_delay(1.5, 3.0)
                 await page.wait_for_selector("#txtBaslangicTarihi", timeout=15000)
                 
                 # Set date range
@@ -240,25 +482,45 @@ class EkapScraper(BaseScraper):
                     if page_num > 10:  # Safety limit
                         break
             
-            # Save results
+            # Save results to PostgreSQL RawDocument
+            items_saved = 0
             if all_results:
-                output_file = self.output_dir / f"ekap_{datetime.now().strftime('%Y%m%d')}.json"
-                with open(output_file, "w", encoding="utf-8") as f:
-                    json.dump(
-                        [r.model_dump() for r in all_results],
-                        f,
-                        ensure_ascii=False,
-                        indent=2,
-                    )
+                async with get_session() as session:
+                    for r in all_results:
+                        try:
+                            # Create a raw text representation
+                            raw_text = f"İhale Kayıt No (İKN): {r.ikn}\nBaşlık: {r.title}\nKazanan: {r.winner_company}\nTutar: {r.bid_amount} TRY\nTarih: {r.tender_date}"
+                            content_hash = RawDocument.compute_hash(raw_text)
+                            
+                            doc = RawDocument(
+                                doc_type=DocumentType.EKAP_TENDER.value,
+                                title=r.title,
+                                source_url=r.source_url,
+                                raw_text=raw_text,
+                                content_hash=content_hash,
+                                session_id=r.ikn,
+                                date=r.tender_date,
+                                metadata_json=r.model_dump(),
+                                processing_status="pending",
+                            )
+                            session.add(doc)
+                            await session.flush()
+                            items_saved += 1
+                        except IntegrityError:
+                            await session.rollback() # Skip duplicate
+                            logger.debug(f"Duplicate EKAP tender skipped: {r.ikn}")
+                        except Exception as e:
+                            await session.rollback()
+                            logger.error(f"Failed to save EKAP tender {r.ikn}: {e}")
             
             duration = (datetime.now() - start_time).total_seconds()
             
             return ScrapeResult(
                 success=True,
                 items_found=len(all_results),
-                items_saved=len(all_results),
+                items_saved=items_saved,
                 duration_seconds=duration,
-                saved_path=str(self.output_dir),
+                saved_path="PostgreSQL: RawDocument",
             )
             
         except Exception as e:

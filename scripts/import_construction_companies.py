@@ -33,7 +33,7 @@ class ConstructionCompany:
     mersis_no: str
     vergi_no: Optional[str] = None
     holding: Optional[str] = None  # Ana holding
-    keywords: list[str] = None  # Alternatif isimler
+    keywords: Optional[list[str]] = None  # Alternatif isimler
     
     def __post_init__(self):
         if self.keywords is None:

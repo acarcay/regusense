@@ -231,7 +231,7 @@ async def run_query(
         records = await result.data()
         
         if return_single:
-            return records[0] if records else {}
+            return [records[0]] if records else []
         return records
 
 
@@ -573,3 +573,128 @@ async def get_criticism_stats() -> dict:
         return results[0]
     return {"criticized_count": 0, "advocated_count": 0, "conflict_candidates": 0}
 
+
+# =============================================================================
+# Temporal Conflict Analysis (Module 4: The Smoking Gun)
+# =============================================================================
+
+async def find_temporal_conflicts(
+    org_mersis: str,
+    tender_date: str,
+    window_days: int = 15,
+) -> list[dict]:
+    """
+    Find ADVOCATED relationships within ±window_days of a tender date.
+    
+    This is the "smoking gun" detector: if a politician advocated for a company
+    within 15 days of that company winning a tender, it's a critical conflict.
+    
+    Args:
+        org_mersis: Company MERSIS number
+        tender_date: Tender award date (ISO format: YYYY-MM-DD)
+        window_days: Days before/after tender to search (default: 15)
+        
+    Returns:
+        List of potential temporal conflicts with:
+        - politician_name, party
+        - advocacy_date
+        - days_difference (negative = before tender, positive = after)
+        - statement_id
+        - confidence, key_triggers
+    """
+    cypher = """
+    MATCH (p:Politician)-[r:ADVOCATED]->(o:Organization {mersis_no: $mersis})
+    WHERE r.created_at IS NOT NULL
+    WITH p, r, o,
+         date($tender_date) as tender,
+         date(r.created_at) as advocacy
+    WITH p, r, o, tender, advocacy,
+         duration.inDays(tender, advocacy).days as days_diff
+    WHERE abs(days_diff) <= $window
+    RETURN p.name as politician_name,
+           p.party as party,
+           p.pg_id as politician_id,
+           toString(advocacy) as advocacy_date,
+           days_diff as days_difference,
+           r.statement_id as statement_id,
+           r.confidence as confidence,
+           r.key_triggers as key_triggers,
+           r.is_conflict as is_conflict_candidate,
+           o.name as company_name
+    ORDER BY abs(days_diff) ASC
+    """
+    
+    try:
+        results = await run_query(cypher, {
+            "mersis": org_mersis,
+            "tender_date": tender_date,
+            "window": window_days,
+        })
+        
+        if results:
+            logger.info(f"🔥 Found {len(results)} temporal conflicts for {org_mersis} near {tender_date}")
+        
+        return results
+        
+    except Exception as e:
+        logger.error(f"Temporal conflict query failed: {e}")
+        return []
+
+
+async def find_all_temporal_conflicts(window_days: int = 15) -> list[dict]:
+    """
+    Scan all EKAP tenders and find temporal conflicts with ADVOCATED relationships.
+    
+    This is the batch version for full-system analysis.
+    
+    Returns:
+        List of all temporal conflicts detected
+    """
+    cypher = """
+    // Find all organizations with both tenders and advocacy
+    MATCH (o:Organization)
+    WHERE o.sector = 'CONSTRUCTION' 
+      AND EXISTS((o)<-[:ADVOCATED]-(:Politician))
+    
+    // Get their tender dates from tender nodes if available
+    OPTIONAL MATCH (t:Tender)-[:AWARDED_TO]->(o)
+    WHERE t.award_date IS NOT NULL
+    
+    WITH o, collect(DISTINCT t) as tenders
+    WHERE size(tenders) > 0
+    
+    UNWIND tenders as tender
+    
+    // Find advocacy within window of each tender
+    MATCH (p:Politician)-[r:ADVOCATED]->(o)
+    WHERE r.created_at IS NOT NULL
+    WITH p, r, o, tender,
+         date(tender.award_date) as tender_date,
+         date(r.created_at) as advocacy_date,
+         duration.inDays(date(tender.award_date), date(r.created_at)).days as days_diff
+    WHERE abs(days_diff) <= $window
+    
+    RETURN p.name as politician_name,
+           p.party as party,
+           o.name as company_name,
+           o.mersis_no as company_mersis,
+           tender.ikn as tender_ikn,
+           toString(tender_date) as tender_date,
+           toString(advocacy_date) as advocacy_date,
+           days_diff as days_difference,
+           r.statement_id as statement_id,
+           CASE 
+             WHEN abs(days_diff) <= 3 THEN 'CRITICAL'
+             WHEN abs(days_diff) <= 7 THEN 'HIGH'
+             ELSE 'MEDIUM'
+           END as risk_level
+    ORDER BY abs(days_diff) ASC
+    """
+    
+    try:
+        results = await run_query(cypher, {"window": window_days})
+        logger.info(f"🔥 Temporal conflict scan complete: {len(results)} conflicts found")
+        return results
+    except Exception as e:
+        logger.error(f"Full temporal conflict scan failed: {e}")
+        return []

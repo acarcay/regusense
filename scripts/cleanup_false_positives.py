@@ -17,18 +17,23 @@ import re
 from database import neo4j_client
 import logging
 
-import spacy
+try:
+    import spacy  # type: ignore[import-untyped]
+except ImportError:
+    spacy = None  # type: ignore[assignment]
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Load Spacy model
-try:
-    nlp = spacy.load("tr_core_news_trf")
-    logger.info("Spacy Turkish Transformer model loaded successfully")
-except Exception as e:
-    logger.warning(f"Failed to load Spacy model: {e}. Running without NER...")
-    nlp = None
+nlp = None
+if spacy is not None:
+    try:
+        nlp = spacy.load("tr_core_news_trf")
+        logger.info("Spacy Turkish Transformer model loaded successfully")
+    except Exception as e:
+        logger.warning(f"Failed to load Spacy model: {e}. Running without NER...")
+        nlp = None
 
 # Strict Filtering Configuration
 AMBIGUOUS_KEYWORDS = {"cengiz", "yüksel", "kalyon", "bayburt", "demir", "çelik", "özdemir", "kolin"}
