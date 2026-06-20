@@ -263,14 +263,12 @@ async def create_politician(
     pg_id: int,
     name: str,
     normalized_name: str,
-    party: str = "",
 ) -> dict:
     """Create or merge a Politician node."""
     cypher = """
     MERGE (p:Politician {pg_id: $pg_id})
     SET p.name = $name,
         p.normalized_name = $normalized_name,
-        p.party = $party,
         p.updated_at = datetime()
     RETURN p
     """
@@ -278,7 +276,79 @@ async def create_politician(
         "pg_id": pg_id,
         "name": name,
         "normalized_name": normalized_name,
-        "party": party,
+    })
+
+
+async def create_political_party(name: str, is_opposition: bool = False) -> dict:
+    """Create or merge a PoliticalParty node."""
+    cypher = """
+    MERGE (p:PoliticalParty {name: $name})
+    SET p.is_opposition = $is_opposition,
+        p.updated_at = datetime()
+    RETURN p
+    """
+    return await run_write(cypher, {"name": name, "is_opposition": is_opposition})
+
+
+async def add_politician_role(
+    pg_id: int,
+    party_name: str,
+    title: str,
+    term_name: str = "",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> dict:
+    """Create a SERVED_IN relationship representing a political term."""
+    cypher = """
+    MATCH (p:Politician {pg_id: $pg_id})
+    MATCH (party:PoliticalParty {name: $party_name})
+    MERGE (p)-[r:SERVED_IN {title: $title, term_name: $term_name}]->(party)
+    SET r.start_date = $start_date,
+        r.end_date = $end_date,
+        r.updated_at = datetime()
+    RETURN r
+    """
+    return await run_write(cypher, {
+        "pg_id": pg_id,
+        "party_name": party_name,
+        "title": title,
+        "term_name": term_name,
+        "start_date": start_date,
+        "end_date": end_date,
+    })
+
+
+async def create_speech(pg_id: int, content: str, date: str, term_name: str, raw_speaker_name: str) -> dict:
+    """Create a Speech node in Neo4j representing a statement in TBMM."""
+    cypher = """
+    MERGE (s:Speech {pg_id: $pg_id})
+    SET s.content = $content,
+        s.date = $date,
+        s.term_name = $term_name,
+        s.raw_speaker_name = $raw_speaker_name,
+        s.updated_at = datetime()
+    RETURN s
+    """
+    return await run_write(cypher, {
+        "pg_id": pg_id,
+        "content": content,
+        "date": date,
+        "term_name": term_name,
+        "raw_speaker_name": raw_speaker_name
+    })
+
+async def add_made_speech_relation(speaker_pg_id: int, speech_pg_id: int) -> dict:
+    """Link a Politician to their Speech."""
+    cypher = """
+    MATCH (p:Politician {pg_id: $speaker_pg_id})
+    MATCH (s:Speech {pg_id: $speech_pg_id})
+    MERGE (p)-[r:MADE_SPEECH]->(s)
+    SET r.updated_at = datetime()
+    RETURN r
+    """
+    return await run_write(cypher, {
+        "speaker_pg_id": speaker_pg_id,
+        "speech_pg_id": speech_pg_id,
     })
 
 
@@ -508,29 +578,21 @@ async def create_advocated_relationship(
     })
 
 
-async def update_politician_party(
-    pg_id: int,
-    party: str,
+async def update_political_party_status(
+    party_name: str,
     is_opposition: bool,
 ) -> dict:
     """
-    Update politician with party affiliation and opposition flag.
-    
-    Args:
-        pg_id: Politician PG ID
-        party: Party name (AKP, CHP, etc.)
-        is_opposition: True if opposition party
+    Update political party opposition flag.
     """
     cypher = """
-    MATCH (p:Politician {pg_id: $pg_id})
-    SET p.party = $party,
-        p.is_opposition = $is_opposition,
+    MATCH (p:PoliticalParty {name: $party_name})
+    SET p.is_opposition = $is_opposition,
         p.updated_at = datetime()
     RETURN p
     """
     return await run_write(cypher, {
-        "pg_id": pg_id,
-        "party": party,
+        "party_name": party_name,
         "is_opposition": is_opposition,
     })
 
@@ -611,8 +673,14 @@ async def find_temporal_conflicts(
     WITH p, r, o, tender, advocacy,
          duration.inDays(tender, advocacy).days as days_diff
     WHERE abs(days_diff) <= $window
+    
+    // Find the active party during the advocacy date
+    OPTIONAL MATCH (p)-[term:SERVED_IN]->(party:PoliticalParty)
+    WHERE (term.start_date IS NULL OR date(term.start_date) <= advocacy)
+      AND (term.end_date IS NULL OR date(term.end_date) >= advocacy)
+      
     RETURN p.name as politician_name,
-           p.party as party,
+           party.name as party,
            p.pg_id as politician_id,
            toString(advocacy) as advocacy_date,
            days_diff as days_difference,
@@ -674,8 +742,13 @@ async def find_all_temporal_conflicts(window_days: int = 15) -> list[dict]:
          duration.inDays(date(tender.award_date), date(r.created_at)).days as days_diff
     WHERE abs(days_diff) <= $window
     
+    // Find the active party during the advocacy date
+    OPTIONAL MATCH (p)-[term:SERVED_IN]->(party:PoliticalParty)
+    WHERE (term.start_date IS NULL OR date(term.start_date) <= advocacy_date)
+      AND (term.end_date IS NULL OR date(term.end_date) >= advocacy_date)
+    
     RETURN p.name as politician_name,
-           p.party as party,
+           party.name as party,
            o.name as company_name,
            o.mersis_no as company_mersis,
            tender.ikn as tender_ikn,

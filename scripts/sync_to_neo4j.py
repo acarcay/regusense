@@ -17,6 +17,7 @@ from database.session import get_async_session
 from database.models import Speaker
 from database.graph_schema import SECTOR_DEFINITIONS
 from database import neo4j_client
+from database.graph_helper import GraphHelper
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -40,21 +41,23 @@ async def sync_politicians():
     logger.info("Syncing politicians from PostgreSQL...")
     
     count = 0
+    graph = GraphHelper()
     
     async with get_async_session() as session:
         result = await session.execute(select(Speaker))
         speakers = result.scalars().all()
         
         for speaker in speakers:
-            await neo4j_client.create_politician(
+            await graph.create_siyasetci(
                 pg_id=speaker.id,
-                name=speaker.name,
-                normalized_name=speaker.normalized_name,
-                party="",  # TODO: Add party data if available
+                ad=speaker.name,
+                normalized_ad=speaker.normalized_name,
+                parti=speaker.party or "",
+                unvan=speaker.title or "",
             )
             count += 1
             
-            if count % 100 == 0:
+            if count % 500 == 0:
                 logger.info(f"  Synced {count} politicians...")
     
     logger.info(f"Synced {count} politicians to Neo4j")

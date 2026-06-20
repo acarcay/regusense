@@ -42,8 +42,6 @@ services:
     image: neo4j:5-community
     container_name: regusense_neo4j
     restart: unless-stopped
-    env_file:
-      - .env
     environment:
       NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-regusense_dev}
       NEO4J_PLUGINS: '["apoc"]'

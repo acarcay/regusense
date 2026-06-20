@@ -7,14 +7,14 @@ Defines the core data models:
 - Source: Data sources (commissions, social media, etc.)
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, date, timezone
 from typing import Optional, List
 import hashlib
 import unicodedata
 import re
 
 from sqlalchemy import (
-    Column, String, Text, DateTime, Integer, ForeignKey, 
+    Column, String, Text, DateTime, Date, Integer, ForeignKey, 
     Index, UniqueConstraint, JSON
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -77,8 +77,9 @@ def generate_content_hash(text: str, speaker_id: int, date: str) -> str:
     """
     # Normalize text: lowercase, strip, collapse whitespace
     normalized_text = re.sub(r'\s+', ' ', text.lower().strip())
+    sp_id_str = str(speaker_id) if speaker_id else "unknown"
     
-    content = f"{normalized_text}|{speaker_id}|{date}"
+    content = f"{normalized_text}|{sp_id_str}|{date}"
     return hashlib.sha256(content.encode('utf-8')).hexdigest()
 
 
@@ -93,16 +94,44 @@ class Speaker(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     normalized_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    party: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
     statements: Mapped[List["Statement"]] = relationship("Statement", back_populates="speaker")
+    roles: Mapped[List["SpeakerRole"]] = relationship("SpeakerRole", back_populates="speaker", cascade="all, delete-orphan")
     
     def __repr__(self) -> str:
         return f"<Speaker(id={self.id}, name='{self.name}')>"
+
+
+class SpeakerRole(Base):
+    """
+    Temporal role or term for a politician.
+    
+    Tracks which party they belonged to and what title they held
+    during a specific period (e.g., 27th Term MP for AKP).
+    """
+    __tablename__ = "speaker_roles"
+    
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    speaker_id: Mapped[int] = mapped_column(ForeignKey("speakers.id", ondelete="CASCADE"), index=True)
+    
+    party: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    term_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    
+    start_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    end_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    speaker: Mapped["Speaker"] = relationship("Speaker", back_populates="roles")
+    
+    def __repr__(self) -> str:
+        return f"<SpeakerRole(speaker_id={self.speaker_id}, party='{self.party}', title='{self.title}')>"
 
 
 class Source(Base):
@@ -115,7 +144,7 @@ class Source(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     source_type: Mapped[str] = mapped_column(String(50), nullable=False)  # TBMM_COMMISSION, SOCIAL_MEDIA, TV_INTERVIEW
     url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     
     # Relationships
     statements: Mapped[List["Statement"]] = relationship("Statement", back_populates="source")
@@ -138,10 +167,12 @@ class Statement(Base):
     text: Mapped[str] = mapped_column(Text, nullable=False)
     
     # Foreign keys
-    speaker_id: Mapped[int] = mapped_column(ForeignKey("speakers.id"), nullable=False)
+    speaker_id: Mapped[Optional[int]] = mapped_column(ForeignKey("speakers.id"), nullable=True)
     source_id: Mapped[Optional[int]] = mapped_column(ForeignKey("sources.id"), nullable=True)
+    raw_document_id: Mapped[Optional[int]] = mapped_column(ForeignKey("raw_documents.id"), nullable=True)
     
     # Metadata
+    raw_speaker_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     date: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # YYYY-MM-DD
     topics: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)  # JSONB for flexibility
     page_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
@@ -151,7 +182,7 @@ class Statement(Base):
     chroma_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     
     # Timestamps
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     
     # Relationships
     speaker: Mapped["Speaker"] = relationship("Speaker", back_populates="statements")
@@ -311,7 +342,7 @@ class RawDocument(Base):
 
     # ── Zaman damgaları ───────────────────────────────────────────────────────
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+        DateTime, default=datetime.utcnow, nullable=False
     )
     processed_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime,
@@ -322,7 +353,6 @@ class RawDocument(Base):
     # ── Bileşik indeksler ─────────────────────────────────────────────────────
     __table_args__ = (
         Index("ix_raw_documents_type_status", "doc_type", "processing_status"),
-        Index("ix_raw_documents_date", "date"),
     )
 
     # ── Yardımcı metotlar ─────────────────────────────────────────────────────

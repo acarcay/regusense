@@ -42,7 +42,7 @@ from playwright.async_api import (
 import aiohttp
 
 # Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config.settings import COMMISSION_SOURCES, settings
 

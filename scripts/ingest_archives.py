@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Optional
 
 # Add project root to path
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config.settings import settings
 from processors.pdf_processor import PDFProcessor

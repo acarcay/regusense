@@ -37,6 +37,9 @@ asyncpg>=0.29.0
 psycopg2-binary>=2.9.0
 neo4j>=5.18.0          # Neo4j async Python driver (bolt protokolü)
 
+# Wikidata SPARQL (seed_politicians.py)
+SPARQLWrapper>=2.0.0
+
 # LangGraph – Çoklu-Ajan Boru Hattı
 langgraph>=0.2.0               # StateGraph, nodes, conditional edges
 langchain-core>=0.2.0          # BaseMessage, RunnableConfig
