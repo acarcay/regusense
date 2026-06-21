@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import Any, List, Optional
 
 from agents.state import AgentState, Evidence
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +78,7 @@ def format_evidence(evidence_chain: List[Evidence]) -> str:
 
 def call_gemini(prompt: str) -> dict:
     """Call Gemini API for analysis."""
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    api_key = settings.gemini_api_key or os.getenv("GOOGLE_API_KEY")
     
     if not api_key:
         logger.error("Analyst: No Gemini API key found")
@@ -87,7 +88,7 @@ def call_gemini(prompt: str) -> dict:
         from langchain_google_genai import ChatGoogleGenerativeAI
         
         llm = ChatGoogleGenerativeAI(
-            model="gemini-2.0-flash",
+            model=settings.gemini_model,
             google_api_key=api_key,
             temperature=0.3,
         )

@@ -11,6 +11,7 @@ import logging
 from typing import Optional
 from dataclasses import dataclass
 
+from config.settings import settings
 from database.graph_schema import SECTOR_DEFINITIONS, SectorCode
 
 logger = logging.getLogger(__name__)
@@ -117,7 +118,7 @@ class SectorClassifier:
         
         Falls back to keyword matching if LLM unavailable.
         """
-        api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        api_key = settings.gemini_api_key or os.getenv("GOOGLE_API_KEY")
         
         if not api_key or not self.use_llm:
             return self.classify(text)
@@ -127,7 +128,7 @@ class SectorClassifier:
             import json
             
             llm = ChatGoogleGenerativeAI(
-                model="gemini-2.0-flash",
+                model=settings.gemini_model,
                 google_api_key=api_key,
                 temperature=0.1,
             )

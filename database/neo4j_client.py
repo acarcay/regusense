@@ -5,7 +5,6 @@ Provides connection management and Cypher query execution
 with weighted conflict scoring and temporal decay support.
 """
 
-import os
 import asyncio
 import logging
 from datetime import date
@@ -15,12 +14,9 @@ from contextlib import asynccontextmanager
 from neo4j import AsyncGraphDatabase, AsyncDriver
 from neo4j.exceptions import ServiceUnavailable, AuthError
 
-logger = logging.getLogger(__name__)
+from config.settings import settings
 
-# Connection settings (loaded from environment or defaults)
-NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
-NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
-NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "regusense_dev")
+logger = logging.getLogger(__name__)
 
 # Singleton driver instance
 _driver: Optional[AsyncDriver] = None
@@ -111,10 +107,10 @@ async def get_driver() -> AsyncDriver:
         _driver_loop = None
     
     if _driver is None:
-        logger.info(f"Connecting to Neo4j at {NEO4J_URI}")
+        logger.info(f"Connecting to Neo4j at {settings.neo4j_uri}")
         _driver = AsyncGraphDatabase.driver(
-            NEO4J_URI,
-            auth=(NEO4J_USER, NEO4J_PASSWORD),
+            settings.neo4j_uri,
+            auth=(settings.neo4j_user, settings.neo4j_password),
         )
         _driver_loop = current_loop
         
@@ -478,6 +474,12 @@ async def get_politician_network(
     limit: int = 50,
 ) -> list[dict]:
     """Get the network around a politician (n-hop traversal)."""
+    if not isinstance(max_hops, int) or not (1 <= max_hops <= 5):
+        raise ValueError(
+            f"max_hops must be an integer between 1 and 5, got: {max_hops!r}"
+        )
+        
+    # max_hops is validated above — safe to interpolate (not parameterizable in Neo4j)
     cypher = f"""
     MATCH path = (p:Politician {{normalized_name: $name}})-[*1..{max_hops}]-(connected)
     RETURN path

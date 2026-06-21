@@ -166,7 +166,7 @@ def run_detection(
     from intelligence.gemini_analyzer import GeminiAnalyst
     
     # Check for API key
-    api_key = os.environ.get("REGUSENSE_GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
+    api_key = settings.gemini_api_key
     if not api_key:
         logger.error("GEMINI_API_KEY not set")
         raise ValueError("GEMINI_API_KEY environment variable required")

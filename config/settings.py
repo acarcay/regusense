@@ -7,6 +7,7 @@ Centralized configuration using Pydantic Settings for environment variable manag
 from pathlib import Path
 from typing import Final
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,6 +19,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        extra="ignore",
     )
 
     # TBMM Configuration
@@ -41,7 +43,7 @@ class Settings(BaseSettings):
     
     # Gemini API
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-pro"
+    gemini_model: str = "gemini-2.0-flash"  # Updated from deprecated gemini-pro
     
     # Tavily API (for web search)
     tavily_api_key: str = ""
@@ -49,10 +51,10 @@ class Settings(BaseSettings):
     # Neo4j (Graph Database)
     neo4j_uri: str = "bolt://localhost:7687"
     neo4j_user: str = "neo4j"
-    neo4j_password: str = "regusense_dev"
+    neo4j_password: str = ""  # Required — set REGUSENSE_NEO4J_PASSWORD in .env
     
     # Database (PostgreSQL)
-    database_url: str = "postgresql+asyncpg://regusense:regusense_dev_2026@localhost:5432/regusense"
+    database_url: str = ""  # Required — set REGUSENSE_DATABASE_URL in .env
     
     def ensure_directories(self) -> None:
         """Create all required data directories if they don't exist."""
@@ -63,6 +65,25 @@ class Settings(BaseSettings):
             self.logs_dir,
         ]:
             directory.mkdir(parents=True, exist_ok=True)
+
+    @model_validator(mode="after")
+    def warn_if_missing_secrets(self) -> "Settings":
+        """Warn at startup when required secrets are not configured."""
+        missing = []
+        if not self.neo4j_password:
+            missing.append("REGUSENSE_NEO4J_PASSWORD")
+        if not self.database_url:
+            missing.append("REGUSENSE_DATABASE_URL")
+        if not self.gemini_api_key:
+            missing.append("REGUSENSE_GEMINI_API_KEY")
+        if missing:
+            import warnings
+            warnings.warn(
+                f"ReguSense: Missing required config: {missing}. "
+                "Copy .env.example to .env and fill in the values.",
+                stacklevel=2,
+            )
+        return self
 
 
 # Singleton settings instance

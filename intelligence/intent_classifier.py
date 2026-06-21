@@ -16,22 +16,14 @@ import logging
 import os
 from dataclasses import dataclass
 from enum import Enum
-from pathlib import Path
 from typing import Optional
-
-# Load .env file if present
-try:
-    from dotenv import load_dotenv
-    env_path = Path(__file__).parent.parent / ".env"
-    if env_path.exists():
-        load_dotenv(env_path)
-except ImportError:
-    pass  # python-dotenv not installed
 
 try:
     import google.generativeai as genai
 except ImportError:
     genai = None  # type: ignore
+
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -159,11 +151,11 @@ SADECE JSON döndür. Markdown veya ek açıklama ekleme."""
                 "Run: pip install google-generativeai"
             )
         
-        self.api_key = api_key or os.environ.get("REGUSENSE_GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
+        self.api_key = api_key or settings.gemini_api_key
         if not self.api_key:
-            raise ValueError("Gemini API key required. Set GEMINI_API_KEY environment variable.")
+            raise ValueError("Gemini API key required. Set REGUSENSE_GEMINI_API_KEY in .env.")
         
-        self.model_name = model
+        self.model_name = model or settings.gemini_model
         genai.configure(api_key=self.api_key)
         self.model = genai.GenerativeModel(self.model_name)
         

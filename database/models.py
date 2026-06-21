@@ -25,49 +25,7 @@ class Base(DeclarativeBase):
     pass
 
 
-def normalize_speaker_name(name: str) -> str:
-    """
-    Normalize speaker name for consistent matching.
-    
-    Handles:
-    - Turkish characters (ş->s, ı->i, ç->c, ğ->g, ö->o, ü->u)
-    - Case normalization
-    - Whitespace cleanup
-    - Twitter handles
-    
-    Example:
-        "Mehmet Şimşek" -> "mehmet simsek"
-        "@memetsimsek" -> "memetsimsek"
-    """
-    if not name:
-        return ""
-    
-    # Remove @ for Twitter handles
-    name = name.lstrip("@")
-    
-    # Turkish character mapping
-    tr_map = {
-        'ş': 's', 'Ş': 'S',
-        'ı': 'i', 'İ': 'I',
-        'ç': 'c', 'Ç': 'C',
-        'ğ': 'g', 'Ğ': 'G',
-        'ö': 'o', 'Ö': 'O',
-        'ü': 'u', 'Ü': 'U',
-    }
-    
-    for tr_char, ascii_char in tr_map.items():
-        name = name.replace(tr_char, ascii_char)
-    
-    # NFD normalization to handle remaining accents
-    name = unicodedata.normalize('NFD', name)
-    name = ''.join(c for c in name if unicodedata.category(c) != 'Mn')
-    
-    # Lowercase and clean whitespace
-    name = name.lower().strip()
-    name = re.sub(r'\s+', ' ', name)
-    
-    return name
-
+from utils.text import normalize_speaker_name
 
 def generate_content_hash(text: str, speaker_id: int, date: str) -> str:
     """
@@ -94,8 +52,8 @@ class Speaker(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     normalized_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     
     # Relationships
     statements: Mapped[List["Statement"]] = relationship("Statement", back_populates="speaker")
@@ -124,8 +82,8 @@ class SpeakerRole(Base):
     start_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     end_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     
     # Relationships
     speaker: Mapped["Speaker"] = relationship("Speaker", back_populates="roles")
@@ -144,7 +102,7 @@ class Source(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     source_type: Mapped[str] = mapped_column(String(50), nullable=False)  # TBMM_COMMISSION, SOCIAL_MEDIA, TV_INTERVIEW
     url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     
     # Relationships
     statements: Mapped[List["Statement"]] = relationship("Statement", back_populates="source")
@@ -173,7 +131,10 @@ class Statement(Base):
     
     # Metadata
     raw_speaker_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    date: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # YYYY-MM-DD
+    date: Mapped[Optional[str]] = mapped_column(
+        String(20), nullable=True
+        # TODO: Migrate to SQLAlchemy Date type via Alembic (requires migration)
+    )  # YYYY-MM-DD
     topics: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)  # JSONB for flexibility
     page_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     session_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
@@ -182,7 +143,7 @@ class Statement(Base):
     chroma_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     
     # Timestamps
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     
     # Relationships
     speaker: Mapped["Speaker"] = relationship("Speaker", back_populates="statements")
@@ -317,6 +278,7 @@ class RawDocument(Base):
         nullable=True,
         index=True,
         comment="Belge tarihi – YYYY-MM-DD formatı",
+        # TODO: Migrate to SQLAlchemy Date type via Alembic (requires migration)
     )
 
     # ── İşleme durumu ─────────────────────────────────────────────────────────
@@ -342,7 +304,7 @@ class RawDocument(Base):
 
     # ── Zaman damgaları ───────────────────────────────────────────────────────
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=False
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
     )
     processed_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime,

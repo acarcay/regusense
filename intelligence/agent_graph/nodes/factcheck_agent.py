@@ -24,6 +24,7 @@ import os
 import re
 from typing import Any, Optional
 
+from config.settings import settings
 from intelligence.agent_graph.state import (
     ContradictionBundle,
     EntityBundle,
@@ -66,9 +67,9 @@ def _call_gemini(prompt: str) -> dict:
 
     Hata durumunda boş/nötr skor döner; pipeline çökmez.
     """
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    api_key = settings.gemini_api_key or os.getenv("GOOGLE_API_KEY")
     if not api_key:
-        logger.error("FactCheckAgent: GEMINI_API_KEY bulunamadı")
+        logger.error("FactCheckAgent: Gemini API key bulunamadı — .env dosyasını kontrol et")
         return {"contradiction_score": 0, "contradiction_type": "NONE",
                 "explanation": "API key yok", "key_conflict_points": []}
 
@@ -76,7 +77,7 @@ def _call_gemini(prompt: str) -> dict:
         from langchain_google_genai import ChatGoogleGenerativeAI
 
         llm = ChatGoogleGenerativeAI(
-            model="gemini-2.0-flash",
+            model=settings.gemini_model,
             google_api_key=api_key,
             temperature=0.2,
         )

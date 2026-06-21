@@ -13,15 +13,14 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from core.config import settings
+from config.settings import settings
 
+# IMPORTANT: Schema changes MUST go through Alembic migrations.
+# Do NOT call Base.metadata.create_all() in production.
+# To apply migrations: alembic upgrade head
 
-# Database URL from settings with async driver
-DATABASE_URL = getattr(
-    settings, 
-    'database_url', 
-    'postgresql+asyncpg://regusense:regusense_dev_2026@localhost:5432/regusense'
-)
+# Database URL from settings
+DATABASE_URL = settings.database_url
 
 # Create async engine
 async_engine = create_async_engine(

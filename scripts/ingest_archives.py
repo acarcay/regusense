@@ -70,59 +70,7 @@ class ParsedStatement:
         }
 
 
-def normalize_speaker_name(speaker: str) -> str:
-    """
-    Normalize speaker name for consistency in the database.
-    
-    Handles common inconsistencies:
-    - Removes party group prefixes (e.g., "AK PARTİ GRUBU ADINA")
-    - Removes location suffixes in parentheses (e.g., "(İstanbul)")
-    - Normalizes whitespace
-    - Handles Turkish characters correctly
-    
-    Args:
-        speaker: Raw speaker name from transcript
-        
-    Returns:
-        Normalized speaker name
-        
-    Examples:
-        >>> normalize_speaker_name("AK PARTİ GRUBU ADINA MEHMET ŞİMŞEK (Gaziantep)")
-        "MEHMET ŞİMŞEK"
-        >>> normalize_speaker_name("İYİ PARTİ GRUBU ADINA METİN ERGUN (Muğla)")
-        "METİN ERGUN"
-    """
-    if not speaker:
-        return ""
-    
-    # Normalize whitespace
-    speaker = " ".join(speaker.split())
-    
-    # Remove party group prefixes
-    group_patterns = [
-        r"^AK\s*PARTİ\s+GRUBU\s+ADINA\s+",
-        r"^CHP\s+GRUBU\s+ADINA\s+",
-        r"^MHP\s+GRUBU\s+ADINA\s+",
-        r"^İYİ\s+PARTİ\s+GRUBU\s+ADINA\s+",
-        r"^HDP\s+GRUBU\s+ADINA\s+",
-        r"^DEM\s+PARTİ\s+GRUBU\s+ADINA\s+",
-        r"^YENİ\s+YOL\s+GRUBU\s+ADINA\s+",
-        r"^TBMM\s+BAŞKANI\s+",
-        r"^BAŞKAN\s+",
-        r"^KOMISYON\s+BAŞKANI\s+",
-    ]
-    
-    for pattern in group_patterns:
-        speaker = re.sub(pattern, "", speaker, flags=re.IGNORECASE)
-    
-    # Remove location in parentheses at the end
-    speaker = re.sub(r"\s*\([^)]+\)\s*$", "", speaker)
-    
-    # Strip and clean up
-    speaker = speaker.strip()
-    
-    return speaker
-
+from utils.text import normalize_speaker_name
 
 class TranscriptParser:
     """Parser for structured TBMM transcript text.
