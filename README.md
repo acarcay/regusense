@@ -1,50 +1,53 @@
 # 🔍 ReguSense
 
-**B2B RegTech Intelligence Platform** — AI-powered political contradiction detection and legislative risk monitoring for Turkish Parliament (TBMM).
+**B2B RegTech Intelligence Platform** — AI-powered political contradiction detection, legislative risk monitoring, and temporal conflict analysis for the Turkish Parliament (TBMM).
 
 ![Python](https://img.shields.io/badge/Python-3.11+-blue)
 ![Gemini](https://img.shields.io/badge/AI-Google%20Gemini-orange)
+![LangGraph](https://img.shields.io/badge/Agents-LangGraph-purple)
+![Neo4j](https://img.shields.io/badge/GraphDB-Neo4j-blue)
 ![ChromaDB](https://img.shields.io/badge/Vector%20DB-ChromaDB-green)
-![Streamlit](https://img.shields.io/badge/UI-Streamlit-red)
+![PostgreSQL](https://img.shields.io/badge/RDBMS-PostgreSQL-blue)
 
 ---
 
 ## 🎯 Overview
 
-ReguSense monitors Turkish Grand National Assembly (TBMM) proceedings and detects:
+ReguSense monitors Turkish Grand National Assembly (TBMM) proceedings, public procurement data (EKAP), and political statements to detect:
 
 - 🔄 **Political Contradictions** — When politicians contradict their previous statements
+- 🕵️ **Temporal Conflicts (Hunter Scan)** — Detecting correlations between political advocacy and public tenders (e.g., criticizing a company then awarding them a tender)
 - ⚠️ **Legislative Risks** — New taxes, bans, and regulations before they become law
 - 📊 **Trend Analysis** — Track political narratives across time
 
-**Target Sectors:** Fintech, Energy, Construction, Banking
+**Target Sectors:** Fintech, Energy, Construction, Banking, Political Strategy (PoliTech)
 
 ---
 
 ## ✨ Key Features
 
-### 🧠 Contradiction Detection Engine
-- Semantic search using RAG (Retrieval Augmented Generation)
-- LLM-powered verification with Google Gemini
-- Historical statement tracking per politician
-- Confidence scoring and detailed explanations
+### 🤖 Multi-Agent Pipeline (LangGraph)
+An automated pipeline utilizing LangGraph:
+- **IngestionAgent**: Pulls pending documents from PostgreSQL.
+- **ExtractionAgent**: Extracts entities and writes to Neo4j.
+- **FactCheckAgent**: Uses ChromaDB + Gemini LLM for contradiction detection.
+- **PublishingAgent**: Generates Insight Cards (PDFs) and prepares tweets.
 
-### 📡 Live Mode
-- Real-time speech-to-text transcription (Whisper)
-- YouTube/live stream monitoring
-- Automatic contradiction alerts during broadcasts
+### 🧠 Intelligence & Contradiction Engine
+- Semantic search using RAG (Retrieval Augmented Generation) with ChromaDB.
+- LLM-powered verification and intent classification with Google Gemini 2.0.
+- Temporal Conflict Analysis using Neo4j to find relationships between politicians, statements, and awarded companies.
 
-### 📄 Data Ingestion
-- TBMM Commission transcript scraping
-- General Assembly proceedings
-- Twitter/X political statements
-- PDF document processing
+### 📡 Data Collection & Live Mode
+- Stealth EKAP Scraper for public procurement monitoring.
+- TBMM Commission transcript scraping with custom parsers for 5-year historical archives.
+- Real-time speech-to-text transcription (Whisper) for YouTube/live stream monitoring.
+- Wikidata integration via SPARQL.
 
-### 📊 Streamlit Dashboard
-- Interactive contradiction search
-- Speaker filtering with fuzzy matching
-- PDF report generation
-- Historical analysis
+### 📊 Interfaces
+- **Streamlit Dashboard**: Interactive contradiction search, fuzzy matching, and trend analysis.
+- **FastAPI Backend**: Async REST APIs for system integrations.
+- **CLI Tool**: Powerful command-line interface for batch processing and pipeline execution.
 
 ---
 
@@ -54,34 +57,18 @@ ReguSense monitors Turkish Grand National Assembly (TBMM) proceedings and detect
 regusense/
 ├── app.py                    # Streamlit Dashboard
 ├── main.py                   # CLI Pipeline Entry Point
-│
-├── intelligence/
-│   ├── contradiction_engine.py  # Core contradiction detection
-│   ├── gemini_analyzer.py       # Google Gemini AI integration
-│   ├── live_engine.py           # Real-time transcription
-│   └── risk_engine.py           # Risk scoring & analysis
-│
-├── memory/
-│   └── vector_store.py          # ChromaDB vector storage
-│
-├── scrapers/
-│   └── commission_scraper.py    # TBMM data collection
-│
-├── processors/
-│   └── pdf_processor.py         # PDF-to-Text conversion
-│
-├── reporting/
-│   └── pdf_generator.py         # Report generation
-│
-├── config/
-│   └── settings.py              # Configuration management
-│
-├── data/                        # Data storage (gitignored)
-│   ├── raw/                     # Raw downloaded files
-│   ├── chromadb/                # Vector database
-│   └── reports/                 # Generated reports
-│
-└── requirements.txt
+├── api/                      # FastAPI endpoints
+├── core/                     # Core business logic
+├── config/                   # Configuration management
+├── data/                     # Raw files, vector DB, reports
+├── intelligence/             # Agent graph, Gemini analyzer, contradiction engine
+├── memory/                   # ChromaDB vector storage
+├── scrapers/                 # EKAP and TBMM data collection
+├── processors/               # Document and PDF processing
+├── reporting/                # Insight Card PDF generation
+├── database/                 # PostgreSQL and Neo4j clients
+├── workers/                  # Celery background tasks
+└── tests/                    # Pytest test suites
 ```
 
 ---
@@ -102,34 +89,38 @@ source .venv/bin/activate  # Linux/macOS
 # Install dependencies
 pip install -r requirements.txt
 
-# Install Playwright browsers
+# Install Playwright browsers for scrapers
 playwright install chromium
 ```
 
 ### 2. Configure Environment
 
+Copy the example environment file and add your credentials:
 ```bash
 cp .env.example .env
-# Edit .env with your API keys
 ```
-
-Required environment variables:
-```env
-GEMINI_API_KEY=your_google_gemini_api_key
-```
+Ensure you set up your `GEMINI_API_KEY`, PostgreSQL URI, and Neo4j credentials in the `.env` file.
 
 ### 3. Run the Application
 
-**Streamlit Dashboard (Recommended):**
+**Run Multi-Agent Pipeline:**
+```bash
+python main.py --agent-pipeline --batch-size 20
+```
+
+**Run Full Intelligence Scan (EKAP + Hunter + Temporal Analysis):**
+```bash
+python main.py --intelligence-scan --ekap-days 30
+```
+
+**Streamlit Dashboard:**
 ```bash
 streamlit run app.py
 ```
 
-**CLI Pipeline:**
+**Interactive Contradiction Check:**
 ```bash
-python main.py --batch           # Batch analysis mode
-python main.py --interactive     # Interactive mode
-python main.py --live            # Live transcription mode
+python main.py --query "Enflasyon tek haneye düşecek" --speaker "Mehmet Şimşek"
 ```
 
 ---
@@ -139,56 +130,24 @@ python main.py --live            # Live transcription mode
 | Component | Technology |
 |-----------|------------|
 | **Language** | Python 3.11+ |
+| **Multi-Agent** | LangGraph, LangChain |
 | **AI/LLM** | Google Gemini API |
-| **Vector DB** | ChromaDB |
-| **Embeddings** | Sentence Transformers |
-| **Speech-to-Text** | OpenAI Whisper |
-| **Web Scraping** | Playwright, BeautifulSoup |
-| **PDF Processing** | pdfplumber, pypdf |
+| **Graph DB** | Neo4j (Temporal Analysis) |
+| **Vector DB** | ChromaDB (RAG) |
+| **Relational DB** | PostgreSQL, asyncpg, SQLAlchemy |
+| **Task Queue** | Celery, Redis |
+| **API Framework** | FastAPI, Uvicorn |
+| **Web Scraping** | Playwright (Stealth), BeautifulSoup |
+| **Speech-to-Text**| OpenAI Whisper |
 | **Dashboard** | Streamlit |
-| **Fuzzy Matching** | TheFuzz (Levenshtein) |
-| **Reports** | FPDF2 |
 
 ---
 
-## 📖 Usage Examples
+## 🔐 Security & Operations
 
-### Detect Contradictions
-
-```python
-from memory.vector_store import PoliticalMemory
-from intelligence.contradiction_engine import ContradictionDetector
-
-memory = PoliticalMemory()
-detector = ContradictionDetector(memory)
-
-result = detector.detect(
-    query="Enflasyon tek haneye düşecek",
-    speaker="Mehmet Şimşek"
-)
-
-print(f"Contradiction: {result['is_contradiction']}")
-print(f"Confidence: {result['confidence']}%")
-```
-
-### Ingest New Data
-
-```python
-# From JSON file
-python main.py ingest --file statements.json
-
-# From TBMM transcripts
-python scrape_general_assembly.py
-python ingest_archives.py
-```
-
----
-
-## 🔐 Security
-
-- API keys stored in `.env` (never committed)
-- Large data files excluded via `.gitignore`
-- No sensitive data in version control
+- API keys and DB credentials securely stored in `.env`.
+- Asynchronous data processing via Celery and Redis to prevent blocking.
+- Configured structured logging (`pipeline.log`) for system observability.
 
 ---
 
