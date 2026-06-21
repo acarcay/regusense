@@ -24,25 +24,21 @@ from typing import Annotated, List, Literal, Optional, TypedDict
 # =============================================================================
 
 @dataclass
-class RawDocumentDTO:
+class StatementDTO:
     """
-    PostgreSQL ``raw_documents`` tablosundan gelen ham belge özeti.
-
-    Tam metni taşımak yerine id + özet tutar; işleme node'ları gerektiğinde
-    DB'ye döner.
+    PostgreSQL `statements` tablosundan gelen tekil ifade özeti.
     """
-    doc_id: int
-    doc_type: str                     # DocumentType enum değeri
-    title: Optional[str]
-    raw_text: str
-    date: Optional[str]               # YYYY-MM-DD
+    stmt_id: int
+    raw_document_id: int
+    text: str
+    speaker: str
+    date: str
+    page_number: int
     session_id: Optional[str]
     source_url: Optional[str]
-    metadata: dict = field(default_factory=dict)
 
     def short_text(self, n: int = 200) -> str:
-        """İlk n karakteri döndür (log çıktısı için)."""
-        return self.raw_text[:n] + ("…" if len(self.raw_text) > n else "")
+        return self.text[:n] + ("…" if len(self.text) > n else "")
 
 
 @dataclass
@@ -160,7 +156,7 @@ class PipelineState(TypedDict, total=False):
     completed_at: Optional[str]
 
     # ── Aşama 1: Ingest ──────────────────────────────────────────────────────
-    raw_documents: Annotated[List[RawDocumentDTO], operator.add]
+    statements: Annotated[List[StatementDTO], operator.add]
     # Toplam ingest edilen belge sayısı (özet için)
     ingested_count: int
 
@@ -204,7 +200,7 @@ def create_pipeline_state(
         batch_size=batch_size,
         started_at=datetime.now().isoformat(),
         completed_at=None,
-        raw_documents=[],
+        statements=[],
         ingested_count=0,
         extracted_entities=[],
         neo4j_nodes_created=0,

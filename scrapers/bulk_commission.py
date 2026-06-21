@@ -48,14 +48,8 @@ from config.settings import COMMISSION_SOURCES, settings
 
 # Configure logging
 settings.ensure_directories()
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler(settings.logs_dir / "bulk_scraper.log", mode="a"),
-    ],
-)
+from core.logging_config import setup_logging
+setup_logging(level="INFO", log_file=settings.logs_dir / "bulk_scraper.log")
 logger = logging.getLogger(__name__)
 
 

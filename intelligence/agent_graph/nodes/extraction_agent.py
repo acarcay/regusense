@@ -27,7 +27,7 @@ from typing import Any
 from intelligence.agent_graph.state import (
     EntityBundle,
     PipelineState,
-    RawDocumentDTO,
+    StatementDTO,
 )
 
 logger = logging.getLogger(__name__)
@@ -60,7 +60,7 @@ def _extract_entities_sync(raw_text: str) -> dict:
 
 async def _write_to_neo4j(
     entities: dict,
-    doc: RawDocumentDTO,
+    stmt: StatementDTO,
     helper,
 ) -> tuple[int, int]:
     """
@@ -158,7 +158,7 @@ async def extraction_agent(state: PipelineState) -> dict[str, Any]:
         ``neo4j_relationships_created``, ``errors``
     """
     run_id = state.get("run_id", "unknown")
-    raw_documents: list[RawDocumentDTO] = state.get("raw_documents", [])
+    raw_documents: list[StatementDTO] = state.get("statements", [])
 
     logger.info(
         "ExtractionAgent [run=%s]: %d belge işlenecek",
@@ -175,7 +175,9 @@ async def extraction_agent(state: PipelineState) -> dict[str, Any]:
         }
 
     from database.graph_helper import GraphHelper
+    from memory.vector_store import PoliticalMemory
     helper = GraphHelper()
+    memory = PoliticalMemory()
 
     bundles: list[EntityBundle] = []
     total_nodes = 0
@@ -184,8 +186,8 @@ async def extraction_agent(state: PipelineState) -> dict[str, Any]:
 
     for doc in raw_documents:
         logger.debug(
-            "ExtractionAgent: Belge %d işleniyor (%s)…",
-            doc.doc_id, doc.doc_type,
+            "ExtractionAgent: Statement %d işleniyor…",
+            doc.stmt_id,
         )
         try:
             # ── 1. NER çalıştır (CPU-bound → thread pool'da çalıştır) ──
@@ -193,7 +195,7 @@ async def extraction_agent(state: PipelineState) -> dict[str, Any]:
             entities = await loop.run_in_executor(
                 None,                       # Varsayılan thread pool
                 _extract_entities_sync,
-                doc.raw_text,
+                doc.text,
             )
 
             # ── 2. Neo4j'e yaz ────────────────────────────────────────────
@@ -204,39 +206,55 @@ async def extraction_agent(state: PipelineState) -> dict[str, Any]:
             # ── 3. EntityBundle oluştur ───────────────────────────────────
             # Konuşmacı: varsa metadata'dan al, yoksa ilk kişi adı
             speaker = (
-                doc.metadata.get("speaker", "")
+                doc.speaker
                 or (entities["persons"][0] if entities["persons"] else "")
             )
 
             bundle = EntityBundle(
-                doc_id=doc.doc_id,
-                doc_type=doc.doc_type,
+                doc_id=doc.raw_document_id,
+                doc_type="Statement",
                 persons=entities["persons"],
                 organizations=entities["organizations"],
                 dates=entities["dates"],
                 topics=entities["topics"],
-                raw_text=doc.raw_text,
+                raw_text=doc.text,
                 speaker=speaker,
                 statement_date=doc.date or "",
             )
             bundles.append(bundle)
 
-            # ── 4. PostgreSQL → done ──────────────────────────────────────
-            await _mark_document_done(doc.doc_id)
+            # ── 3.5 ChromaDB'ye ekle ──────────────────────────────────────
+            # Run in executor since ingest_text is sync
+            await loop.run_in_executor(
+                None,
+                memory.ingest_text,
+                doc.text,
+                {
+                    "speaker": speaker,
+                    "date": doc.date or "",
+                    "source": doc.source_url or "",
+                    "source_type": "PIPELINE",
+                    "page_number": doc.page_number or 0,
+                    "topics": ",".join(entities["topics"]) if entities["topics"] else ""
+                }
+            )
+
+            # ── 4. PostgreSQL → done (This should be done per document later, but for now we'll do it per statement's document) ──────
+            await _mark_document_done(doc.raw_document_id)
 
             logger.debug(
-                "ExtractionAgent: Belge %d → %d kişi, %d org, %d konu",
-                doc.doc_id,
+                "ExtractionAgent: Statement %d → %d kişi, %d org, %d konu",
+                doc.stmt_id,
                 len(entities["persons"]),
                 len(entities["organizations"]),
                 len(entities["topics"]),
             )
 
         except Exception as exc:
-            msg = f"ExtractionAgent belge {doc.doc_id} hata: {exc}"
+            msg = f"ExtractionAgent statement {doc.stmt_id} hata: {exc}"
             logger.exception(msg)
             errors.append(msg)
-            await _mark_document_failed(doc.doc_id, str(exc))
+            await _mark_document_failed(doc.raw_document_id, str(exc))
 
     logger.info(
         "ExtractionAgent [run=%s]: %d bundle üretildi, "

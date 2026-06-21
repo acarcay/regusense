@@ -23,15 +23,11 @@ from scrapers.ekap_scraper import EkapScraper
 from scrapers.resmi_gazete_scraper import ResmiGazeteScraper
 from main import run_agent_pipeline
 
+from core.logging_config import setup_logging
+from config.settings import settings
+
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler("scheduler.log")
-    ]
-)
+setup_logging(level="INFO", log_file=settings.logs_dir / "scheduler.log")
 logger = logging.getLogger("ReguSenseScheduler")
 
 

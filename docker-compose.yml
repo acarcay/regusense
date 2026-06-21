@@ -58,6 +58,37 @@ services:
       timeout: 10s
       retries: 5
 
+  regusense:
+    build: .
+    container_name: regusense_api
+    restart: unless-stopped
+    env_file: [.env]
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  scheduler:
+    build: .
+    container_name: regusense_scheduler
+    restart: unless-stopped
+    env_file: [.env]
+    command: ["python", "workers/scheduler.py"]
+    depends_on:
+      regusense:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   redis_data:

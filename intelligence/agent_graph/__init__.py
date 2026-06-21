@@ -23,7 +23,7 @@ from intelligence.agent_graph.graph import (
 from intelligence.agent_graph.state import (
     PipelineState,
     create_pipeline_state,
-    RawDocumentDTO,
+    StatementDTO,
     EntityBundle,
     ContradictionBundle,
     InsightCard,
@@ -38,7 +38,7 @@ __all__ = [
     "PipelineState",
     "create_pipeline_state",
     # DTOs
-    "RawDocumentDTO",
+    "StatementDTO",
     "EntityBundle",
     "ContradictionBundle",
     "InsightCard",

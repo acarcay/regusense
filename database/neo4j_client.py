@@ -18,8 +18,6 @@ from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
-# Singleton driver instance
-_driver: Optional[AsyncDriver] = None
 
 
 # =============================================================================
@@ -89,8 +87,15 @@ def calculate_conflict_score(
 # Driver Management
 # =============================================================================
 
-_driver = None
-_driver_loop = None
+# ---------------------------------------------------------------------------
+# Driver singleton — module-level state.
+# In Streamlit (multi-loop) environments the driver is re-created when the
+# event loop changes. For production multi-threaded use, prefer FastAPI
+# lifespan dependency injection over this singleton pattern.
+# ---------------------------------------------------------------------------
+
+_driver: Optional[AsyncDriver] = None
+_driver_loop: Optional[asyncio.AbstractEventLoop] = None
 
 async def get_driver() -> AsyncDriver:
     """Get or create Neo4j driver (singleton, loop-aware for Streamlit)."""

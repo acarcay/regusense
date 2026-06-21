@@ -221,6 +221,10 @@ class HealthResponse(BaseModel):
     timestamp: str = Field(
         default_factory=lambda: datetime.now().isoformat()
     )
+    checks: dict[str, dict[str, str]] = Field(
+        default_factory=dict,
+        description="Detailed status of backend services"
+    )
     version: str = "1.0.0"
 
 

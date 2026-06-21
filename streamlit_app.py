@@ -1167,31 +1167,27 @@ def main():
                 source = match.get("source", "Bilinmiyor")
                 page = match.get("page_number", 0)
                 date = match.get("date", "Tarih bilinmiyor")
+                page_html = f"📄 <strong>Sayfa:</strong> {page}<br>" if page > 0 else ""
                 
                 st.markdown(f"""
-                <div class="citation-box">
-                    📁 <strong>Kaynak:</strong> {source}<br>
-                    📄 <strong>Sayfa:</strong> {page if page > 0 else "N/A"}<br>
-                    📅 <strong>Tarih:</strong> {date}<br>
-                    🏷️ <strong>Tip:</strong> {source_type}
-                </div>
-                """, unsafe_allow_html=True)
+<div class="citation-box">
+📁 <strong>Kaynak:</strong> {source}<br>
+{page_html}📅 <strong>Tarih:</strong> {date}<br>
+🏷️ <strong>Tip:</strong> {source_type}
+</div>
+""", unsafe_allow_html=True)
                 
                 # Open PDF button
                 source_file = match.get("source", "")
                 if source_file and source_file.endswith(".pdf"):
                     col_a, col_b = st.columns([3, 1])
                     with col_b:
-                        pdf_paths = [
-                            Path("data/raw/contracts") / source_file,
-                            Path("data/organized") / source_file,
-                        ]
-                        
-                        for pdf_path in pdf_paths:
-                            if pdf_path.exists():
-                                if st.button(f"📂 PDF Aç", key=f"open_pdf_{i}"):
-                                    open_pdf(str(pdf_path), page=page)
-                                break
+                        # Recursively search for the PDF in the data directory
+                        found_pdfs = list(Path("data").rglob(source_file))
+                        if found_pdfs:
+                            pdf_path = found_pdfs[0]
+                            if st.button(f"📂 PDF Aç", key=f"open_pdf_{i}"):
+                                open_pdf(str(pdf_path), page=page)
     
     # =========================================================================
     # Footer

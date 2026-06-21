@@ -41,10 +41,8 @@ from processors.pdf_processor import PDFProcessor
 from memory.vector_store import PoliticalMemory
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
+from core.logging_config import setup_logging
+setup_logging(level="INFO")
 logger = logging.getLogger(__name__)
 
 
@@ -894,7 +892,7 @@ def main():
     print(f"  Mode: {'Dry Run (Preview)' if args.dry_run else 'Full Ingestion'}")
     print("=" * 60 + "\n")
     
-    ingestor = ArchiveIngestor(pdf_dir=args.dir)
+    ingestor = ArchiveIngestor(data_dir=args.dir)
     
     if args.file:
         # Single file

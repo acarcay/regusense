@@ -20,6 +20,9 @@ Author: ReguSense Team
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from intelligence.gemini_analyzer import GeminiAnalyst
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -28,7 +31,6 @@ from typing import Any, Optional
 from thefuzz import process as fuzz_process
 
 from intelligence.entity_extractor import EntityExtractor, get_entity_extractor
-from intelligence.knowledge_graph import KnowledgeGraph, get_knowledge_graph, EvidencePair
 
 logger = logging.getLogger(__name__)
 
@@ -146,13 +148,12 @@ class ContradictionDetector:
         print(f"Kanıt 2: {result.evidence_2.text}")
     """
     
-    DEFAULT_THRESHOLD = 6  # 6/10 = contradiction
+    DEFAULT_THRESHOLD = 6  # 6/10 scale (equivalent to 60/100 in GeminiAnalyst)
     
     def __init__(
         self,
-        memory: Any,  # PoliticalMemory for vector search fallback
+        memory: Any,  # PoliticalMemory for vector search
         analyzer: Any,  # GeminiAnalyst for LLM analysis
-        knowledge_graph: Optional[KnowledgeGraph] = None,
         entity_extractor: Optional[EntityExtractor] = None,
         contradiction_threshold: int = DEFAULT_THRESHOLD,
     ):
@@ -162,21 +163,18 @@ class ContradictionDetector:
         Args:
             memory: PoliticalMemory for vector search
             analyzer: GeminiAnalyst for LLM
-            knowledge_graph: Optional KnowledgeGraph instance
             entity_extractor: Optional EntityExtractor instance
             contradiction_threshold: Score threshold (0-10 scale)
         """
         self.memory = memory
         self.analyzer = analyzer
-        self.graph = knowledge_graph or get_knowledge_graph()
         self.extractor = entity_extractor or get_entity_extractor()
         self.contradiction_threshold = contradiction_threshold
         
         self._speaker_cache: Optional[set[str]] = None
         
         logger.info(
-            f"ContradictionDetector initialized (threshold={contradiction_threshold}/10, "
-            f"graph_statements={self.graph.stats()['total_statements']})"
+            f"ContradictionDetector initialized (threshold={contradiction_threshold}/10)"
         )
     
     def _resolve_speaker(self, name: str, min_score: int = 65) -> str:
@@ -208,38 +206,19 @@ class ContradictionDetector:
         source: str = "",
         source_type: str = "",
     ) -> None:
-        """Extract entities and add to knowledge graph."""
+        """Extract entities and index into ChromaDB."""
         result = self.extractor.extract(text)
         
-        self.graph.add_statement(
+        self.memory.ingest_text(
             text=text,
-            speaker=speaker,
-            topics=result.topics,
-            date=date,
-            source=source,
-            source_type=source_type,
-            entities={
-                "persons": result.persons,
-                "organizations": result.organizations,
-            },
+            metadata={
+                "speaker": speaker,
+                "date": date,
+                "source": source,
+                "source_type": source_type,
+                "topics": ",".join(result.topics) if result.topics else ""
+            }
         )
-    
-    def _get_evidence_from_graph(
-        self,
-        speaker: str,
-        topics: list[str],
-    ) -> Optional[EvidencePair]:
-        """Get best evidence pair from knowledge graph."""
-        for topic in topics:
-            pairs = self.graph.get_evidence_pairs(
-                speaker=speaker,
-                topic=topic,
-                min_time_delta_days=30,
-            )
-            if pairs:
-                return pairs[0]  # Return best pair
-        
-        return None
     
     def _get_evidence_from_vector(
         self,
@@ -268,14 +247,16 @@ class ContradictionDetector:
         self,
         new_statement: str,
         evidence_1: dict,
-        evidence_2: Optional[dict],
+        evidence_2: dict,
         speaker: str,
     ) -> dict:
         """
-        Send evidence pair to LLM for contradiction analysis.
+        [DEPRECATED] Replaced by self.analyzer.analyze_contradiction().
+        Kept for backward compatibility only.
         
-        Uses specialized prompt for evidence-based comparison.
+        Analyze statements for contradictions using Gemini.
         """
+        
         prompt = f"""Sen bir siyasi çelişki analisti'sin. Aşağıdaki iki açıklamayı karşılaştır.
 
 ## Konuşmacı
@@ -377,22 +358,11 @@ Sadece JSON döndür, başka bir şey yazma."""
         
         logger.debug(f"Extracted topics: {topics}")
         
-        # Step 2: Try knowledge graph first
+        # Step 2: Try vector search
         evidence_1 = None
         evidence_2 = None
         
-        if resolved_speaker and topics:
-            pair = self._get_evidence_from_graph(resolved_speaker, topics)
-            
-            if pair:
-                evidence_1 = Evidence(
-                    text=pair.evidence_1.text,
-                    date=pair.evidence_1.date,
-                    source=pair.evidence_1.source,
-                    source_type=pair.evidence_1.source_type,
-                    topics=pair.evidence_1.topics,
-                )
-                logger.info(f"Found evidence pair from graph (delta: {pair.time_delta_days} days)")
+        # Removed knowledge graph fallback
         
         # Step 3: Fall back to vector search
         historical_matches = []
@@ -425,16 +395,17 @@ Sadece JSON döndür, başka bir şey yazma."""
             topics=topics,
         )
         
-        # Step 4: LLM Analysis
-        analysis = self._analyze_with_llm(
+        # Step 4: LLM Analysis via GeminiAnalyst (superior prompt with platform comparison)
+        analysis = self.analyzer.analyze_contradiction(
             new_statement=new_statement,
-            evidence_1=evidence_1.to_dict(),
-            evidence_2=evidence_2.to_dict(),
+            historical_statements=[evidence_1.to_dict()],
             speaker=resolved_speaker,
         )
         
-        # Parse score (ensure 0-10 scale)
-        score = min(10, max(0, int(analysis.get("contradiction_score", 0))))
+        # GeminiAnalyst returns 0-100 scale; normalize to 0-10
+        raw_score = int(analysis.get("contradiction_score", 0))
+        analysis["contradiction_score"] = min(10, max(0, raw_score // 10))
+        score = analysis["contradiction_score"]
         
         # Parse type
         type_str = analysis.get("contradiction_type", "NONE")
@@ -491,48 +462,7 @@ Sadece JSON döndür, başka bir şey yazma."""
         
         return results
     
-    def index_historical_data(
-        self,
-        limit: int = 10000,
-    ) -> int:
-        """
-        Index existing data from vector store into knowledge graph.
-        
-        Call this once to populate the graph with historical data.
-        
-        Returns:
-            Number of statements indexed
-        """
-        logger.info("Indexing historical data to knowledge graph...")
-        
-        # Get all unique speakers
-        speakers = self.memory.get_unique_speakers()
-        indexed = 0
-        
-        for speaker in list(speakers)[:100]:  # Limit speakers
-            # Get statements for this speaker
-            matches = self.memory.search(
-                query_text="",
-                top_k=100,
-                speaker_filter=speaker,
-            )
-            
-            for match in matches:
-                if indexed >= limit:
-                    break
-                
-                # Extract and index
-                self._extract_and_index(
-                    text=match.text,
-                    speaker=match.speaker,
-                    date=match.date,
-                    source=match.source,
-                    source_type=match.source_type,
-                )
-                indexed += 1
-        
-        logger.info(f"Indexed {indexed} statements to knowledge graph")
-        return indexed
+        pass
     
     # Legacy compatibility
     @property

@@ -52,8 +52,8 @@ class Speaker(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     normalized_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
     statements: Mapped[List["Statement"]] = relationship("Statement", back_populates="speaker")
@@ -82,8 +82,8 @@ class SpeakerRole(Base):
     start_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     end_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
     speaker: Mapped["Speaker"] = relationship("Speaker", back_populates="roles")
@@ -102,7 +102,7 @@ class Source(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     source_type: Mapped[str] = mapped_column(String(50), nullable=False)  # TBMM_COMMISSION, SOCIAL_MEDIA, TV_INTERVIEW
     url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     
     # Relationships
     statements: Mapped[List["Statement"]] = relationship("Statement", back_populates="source")
@@ -143,11 +143,12 @@ class Statement(Base):
     chroma_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     
     # Timestamps
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     
     # Relationships
     speaker: Mapped["Speaker"] = relationship("Speaker", back_populates="statements")
     source: Mapped[Optional["Source"]] = relationship("Source", back_populates="statements")
+    raw_document: Mapped[Optional["RawDocument"]] = relationship("RawDocument", back_populates="statements")
     
     # Indexes and constraints
     __table_args__ = (
@@ -304,13 +305,15 @@ class RawDocument(Base):
 
     # ── Zaman damgaları ───────────────────────────────────────────────────────
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+        DateTime, default=datetime.utcnow, nullable=False
     )
     processed_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime,
         nullable=True,
         comment="İşleme tamamlandığında set edilir",
     )
+    
+    statements: Mapped[List["Statement"]] = relationship("Statement", back_populates="raw_document")
 
     # ── Bileşik indeksler ─────────────────────────────────────────────────────
     __table_args__ = (
@@ -327,13 +330,13 @@ class RawDocument(Base):
     def mark_done(self) -> None:
         """Belgeyi başarıyla işlenmiş olarak işaretle."""
         self.processing_status = DocumentStatus.DONE.value
-        self.processed_at = datetime.now(timezone.utc)
+        self.processed_at = datetime.utcnow()
 
     def mark_failed(self, error: str) -> None:
         """Belgeyi başarısız olarak işaretle ve hatayı kaydet."""
         self.processing_status = DocumentStatus.FAILED.value
         self.error_message = error
-        self.processed_at = datetime.now(timezone.utc)
+        self.processed_at = datetime.utcnow()
 
     def __repr__(self) -> str:
         return (
