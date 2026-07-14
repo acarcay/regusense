@@ -56,6 +56,10 @@ class AgentState(TypedDict, total=False):
     search_depth: int
     # Topics extracted from statement
     topics: List[str]
+    # Detected sector codes (set by Investigator)
+    detected_sectors: List[str]
+    # Conflict-of-interest findings from Neo4j (set by Investigator)
+    conflict_findings: List[dict]
     
     # === Control Flow Flags ===
     # Is this statement newsworthy? (Set by Watchdog)
@@ -121,6 +125,8 @@ def create_initial_state(
         current_hypothesis="",
         search_depth=0,
         topics=[],
+        detected_sectors=[],
+        conflict_findings=[],
         is_newsworthy=False,
         newsworthy_score=0,
         requires_external_search=False,

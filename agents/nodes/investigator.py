@@ -117,18 +117,11 @@ def investigator_node(state: AgentState) -> dict[str, Any]:
     all_conflicts: list[ConflictOfInterest] = []
     new_evidence: list[Evidence] = []
     
-    # Run async query synchronously for now
     import asyncio
-    
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    
+
     for sector_match in sector_matches[:2]:  # Top 2 sectors
         try:
-            connections = loop.run_until_complete(
+            connections = asyncio.run(
                 query_neo4j_conflicts(speaker, sector_match.code)
             )
             

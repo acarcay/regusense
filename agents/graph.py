@@ -18,6 +18,7 @@ from langgraph.graph import StateGraph, END
 from agents.state import AgentState, create_initial_state
 from agents.nodes.watchdog import watchdog_node
 from agents.nodes.archivist import archivist_node
+from agents.nodes.investigator import investigator_node
 from agents.nodes.searcher import searcher_node
 from agents.nodes.analyst import analyst_node
 from agents.nodes.editor import editor_node
@@ -34,8 +35,8 @@ def route_after_watchdog(state: AgentState) -> Literal["archivist", "end"]:
     return "end"
 
 
-def route_after_archivist(state: AgentState) -> Literal["analyst", "searcher"]:
-    """Route based on evidence availability."""
+def route_after_investigator(state: AgentState) -> Literal["analyst", "searcher"]:
+    """Route based on evidence availability (same logic as old archivist routing)."""
     if state.get("requires_external_search", False):
         return "searcher"
     return "analyst"
@@ -76,6 +77,7 @@ def create_graph() -> StateGraph:
     # Add nodes
     graph.add_node("watchdog", watchdog_node)
     graph.add_node("archivist", archivist_node)
+    graph.add_node("investigator", investigator_node)
     graph.add_node("searcher", searcher_node)
     graph.add_node("analyst", analyst_node)
     graph.add_node("editor", editor_node)
@@ -94,9 +96,12 @@ def create_graph() -> StateGraph:
         }
     )
     
+    # Archivist always goes to Investigator (Neo4j conflict check)
+    graph.add_edge("archivist", "investigator")
+
     graph.add_conditional_edges(
-        "archivist",
-        route_after_archivist,
+        "investigator",
+        route_after_investigator,
         {
             "analyst": "analyst",
             "searcher": "searcher",
