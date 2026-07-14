@@ -28,9 +28,9 @@ async def health_check(response: Response) -> HealthResponse:
 
     # PostgreSQL Check
     try:
-        from database.session import async_engine
+        from database.session import get_engine
         from sqlalchemy import text
-        async with async_engine.connect() as conn:
+        async with get_engine().connect() as conn:
             await conn.execute(text("SELECT 1"))
         checks["postgres"] = {"status": "ok", "detail": "connected"}
     except Exception as e:

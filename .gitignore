@@ -1,7 +1,6 @@
-# Environment files (contains secrets)
+# Environment files (contain secrets) — .env.example IS tracked as the template
 .env
 .env.local
-.env.example
 
 # Python
 __pycache__/
@@ -9,6 +8,7 @@ __pycache__/
 *$py.class
 .venv/
 venv/
+.pytest_cache/
 
 # IDE
 .idea/
@@ -28,11 +28,3 @@ data/reports/
 # Logs
 *.log
 data/logs/
-env
-.env
-.env.example
-
-
-# Environment — never commit real credentials
-.env
-

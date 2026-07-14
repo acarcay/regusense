@@ -1,0 +1,11 @@
+# Minimal dependencies to run the unit test suite in CI.
+# The full runtime dependency set lives in requirements.txt.
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+python-dotenv>=1.0.0
+sqlalchemy[asyncio]>=2.0.0
+neo4j>=5.18.0  # pulled in via the database package __init__
+thefuzz>=0.22.0
+python-Levenshtein>=0.25.0

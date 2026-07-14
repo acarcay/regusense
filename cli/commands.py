@@ -1,16 +1,12 @@
 import argparse
+import json
 import logging
-import sys
-import os
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from pathlib import Path
+from typing import Optional
 
-from intelligence.contradiction_engine import ContradictionDetector
-from intelligence.gemini_analyzer import GeminiAnalyst
-from memory.vector_store import PoliticalMemory
 from config.settings import settings
 from pipeline.intelligence import run_intelligence_pipeline
-from pipeline.agent import run_agent_pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +94,52 @@ def run_detection(
     result = detector.detect(query, speaker=speaker)
     
     return result
+
+def print_result(result) -> None:
+    """Print a contradiction detection result to the console."""
+    print(result)  # ContradictionResult.__str__ prints status/score/type/explanation
+    if result.key_conflict_points:
+        print("  Çelişki noktaları:")
+        for point in result.key_conflict_points:
+            print(f"   • {point}")
+    for label, evidence in (("Kanıt 1", result.evidence_1), ("Kanıt 2", result.evidence_2)):
+        if evidence:
+            data = evidence.to_dict()
+            text = str(data.get("text", ""))[:120]
+            print(f"  {label}: {text} ({data.get('date', '?')} — {data.get('source', '?')})")
+
+
+def load_sample_data(memory) -> int:
+    """Load the built-in sample statements into memory. Returns count ingested."""
+    ids = memory.ingest_batch(SAMPLE_POLITICAL_STATEMENTS)
+    return len(ids)
+
+
+def ingest_from_file(memory, path: str) -> int:
+    """Ingest statements from a JSON or TXT file. Returns count ingested.
+
+    JSON: a list of objects with keys text/speaker/date/topic/source.
+    TXT:  one statement per line (no metadata).
+    """
+    file_path = Path(path)
+    if not file_path.exists():
+        raise FileNotFoundError(f"Dosya bulunamadı: {path}")
+
+    if file_path.suffix.lower() == ".json":
+        items = json.loads(file_path.read_text(encoding="utf-8"))
+        if not isinstance(items, list):
+            raise ValueError("JSON dosyası bir liste içermeli ([{'text': ...}, ...])")
+        ids = memory.ingest_batch(items)
+        return len(ids)
+
+    count = 0
+    for line in file_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line:
+            memory.ingest_text(line, metadata={"source": file_path.name})
+            count += 1
+    return count
+
 
 def generate_report(result) -> Optional[str]:
     """Generate a PDF insight card from the result."""
@@ -213,25 +255,20 @@ def main() -> None:
         help="Max statements to scan in Hunter (default: all)",
     )
 
-    # LangGraph Agent Pipeline Arguments
+    # LangGraph Agent Arguments
     parser.add_argument(
-        "--agent-pipeline",
+        "--agent",
         action="store_true",
         help=(
-            "LangGraph çoklu-ajan pipeline'ını çalıştır: "
-            "IngestionAgent → ExtractionAgent → FactCheckAgent → PublishingAgent"
+            "Çoklu-ajan LangGraph analizini çalıştır (--query gerekli): "
+            "Watchdog → Archivist → Searcher → Analyst → Editor → Human Approval"
         ),
     )
     parser.add_argument(
-        "--batch-size",
-        type=int,
-        default=20,
-        help="Agent pipeline'ında tek seferde işlenecek belge sayısı (varsayılan: 20)",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Sadece ingest + extraction; FactCheck ve Publishing atla",
+        "--date",
+        type=str,
+        default="",
+        help="Açıklamanın tarihi (--agent ile kullanılır)",
     )
     
     args = parser.parse_args()
@@ -242,20 +279,22 @@ def main() -> None:
     print(f"  Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 70 + "\n")
     
-    # Handle --agent-pipeline (LangGraph multi-agent)
-    if args.agent_pipeline:
-        import asyncio
-        print("🤖 LangGraph Agent Pipeline başlatılıyor...")
-        print(f"   batch_size={args.batch_size} | dry_run={args.dry_run}")
-        summary = asyncio.run(
-            run_agent_pipeline(
-                batch_size=args.batch_size,
-                dry_run=args.dry_run,
-            )
+    # Handle --agent (LangGraph multi-agent analysis)
+    if args.agent:
+        if not args.query:
+            parser.error("--agent requires --query (the statement to analyze)")
+        from agents.graph import run_analysis
+
+        print("🤖 LangGraph Agent analizi başlatılıyor...")
+        final_state = run_analysis(
+            statement=args.query,
+            speaker=args.speaker,
+            date=args.date,
         )
-        print("\n✅ Pipeline tamamlandı:")
-        for k, v in summary.items():
-            print(f"   {k}: {v}")
+        print(f"\n✅ Analiz tamamlandı (skor: {final_state.get('contradiction_score', 0)}/10)")
+        report = final_state.get("final_report")
+        if report:
+            print(report)
         return
 
     # Handle --intelligence-scan (run before memory init as it's separate)

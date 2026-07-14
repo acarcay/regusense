@@ -2,7 +2,7 @@
 Contradiction Detection API Routes.
 """
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from typing import Optional
 
 from api.schemas import (
@@ -15,12 +15,16 @@ from api.schemas import (
     HistoricalMatch,
     ContradictionType,
 )
-from core.deps import get_memory, get_analyzer, get_detector
+from core.deps import get_memory, get_analyzer, get_detector, verify_api_key
 from core.logging import get_logger
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/api/v1", tags=["Detection"])
+router = APIRouter(
+    prefix="/api/v1",
+    tags=["Detection"],
+    dependencies=[Depends(verify_api_key)],
+)
 
 
 @router.post(

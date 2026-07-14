@@ -17,8 +17,8 @@ from database.models import (
     DocumentType,
     DocumentStatus,
 )
-from database.session import get_async_session, async_engine
-from database.postgres_client import get_session, engine, create_all_tables
+from database.session import get_async_session, get_engine
+from database.postgres_client import get_session, create_all_tables
 
 # ── Neo4j ──────────────────────────────────────────────────────────────────────
 from database.neo4j_client import (
@@ -41,12 +41,11 @@ __all__ = [
     "RawDocument",
     "DocumentType",
     "DocumentStatus",
-    # PostgreSQL session (session.py – legacy uyumluluk)
+    # PostgreSQL session (database.session — tek engine kaynağı)
     "get_async_session",
-    "async_engine",
-    # PostgreSQL client (postgres_client.py – yeni)
+    "get_engine",
+    # PostgreSQL client (postgres_client.py – uyumluluk katmanı)
     "get_session",
-    "engine",
     "create_all_tables",
     # Neo4j driver & helpers
     "get_driver",

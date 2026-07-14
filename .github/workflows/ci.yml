@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install ruff
+        run: pip install ruff
+      # Gate on real defects (syntax errors, undefined names) while the
+      # existing codebase is cleaned up; tighten to the full ruleset later.
+      - name: Ruff (critical rules)
+        run: ruff check . --select E9,F63,F7,F82
+      - name: Ruff (full ruleset, advisory)
+        run: ruff check . --exit-zero
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install test dependencies
+        run: pip install -r requirements-ci.txt
+      - name: Run unit tests
+        run: pytest tests/ -v

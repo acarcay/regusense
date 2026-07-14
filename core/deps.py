@@ -6,9 +6,13 @@ Provides singleton instances of core services as FastAPI dependencies.
 
 from functools import lru_cache
 from typing import Generator, Optional
+import logging
 import os
+import secrets
 
-from core.config import settings
+from fastapi import Header, HTTPException, status
+
+from config.settings import settings
 
 
 @lru_cache
@@ -102,6 +106,30 @@ def get_report_generator():
 
 
 # FastAPI dependency functions
+async def verify_api_key(
+    x_api_key: Optional[str] = Header(default=None),
+) -> None:
+    """
+    FastAPI dependency enforcing X-API-Key authentication.
+
+    Clients must send the value of REGUSENSE_API_AUTH_KEY in the X-API-Key
+    header. If no key is configured, requests are allowed but a warning is
+    logged (development mode only — always configure a key in production).
+    """
+    if not settings.api_auth_key:
+        logging.getLogger(__name__).warning(
+            "REGUSENSE_API_AUTH_KEY is not set — API authentication is DISABLED. "
+            "Configure it before exposing this service."
+        )
+        return
+
+    if not x_api_key or not secrets.compare_digest(x_api_key, settings.api_auth_key):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing API key. Send it in the X-API-Key header.",
+        )
+
+
 async def memory_dependency():
     """FastAPI dependency for PoliticalMemory."""
     return get_memory()

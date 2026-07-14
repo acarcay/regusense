@@ -1,72 +1,28 @@
 """
 PostgreSQL Client – ReguSense veri katmanı için async bağlantı yöneticisi.
 
-.env dosyasındaki DATABASE_URL değişkeninden bağlantı URL'si okunur.
-SQLAlchemy 2.x async engine + asyncpg driver kullanılır.
+Backward-compatibility layer: the single engine/session factory lives in
+database.session — this module delegates to it so existing imports keep
+working. Yeni kod için database.session.get_async_session kullanın.
 
 Kullanım:
-    from database.postgres_client import get_session, engine
+    from database.postgres_client import get_session
 
     async with get_session() as session:
         result = await session.execute(select(RawDocument))
 """
 
-import os
 import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
-from dotenv import load_dotenv
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
+from sqlalchemy.ext.asyncio import AsyncSession
 
-# .env'i yükle (Docker/prod ortamında sistem env değişkenleri önceliklidir)
-load_dotenv()
+from database.session import get_async_session, get_engine, get_session_factory
 
 logger = logging.getLogger(__name__)
 
-# ─── Bağlantı URL'si ──────────────────────────────────────────────────────────
-# Öncelik sırası: DATABASE_URL env > bireysel parçalardan oluşturulan URL
-_DATABASE_URL: str = os.getenv(
-    "DATABASE_URL",
-    (
-        "postgresql+asyncpg://"
-        f"{os.getenv('POSTGRES_USER', 'regusense')}:"
-        f"{os.getenv('POSTGRES_PASSWORD', 'regusense_dev_2026')}@"
-        f"{os.getenv('POSTGRES_HOST', 'localhost')}:"
-        f"{os.getenv('POSTGRES_PORT', '5432')}/"
-        f"{os.getenv('POSTGRES_DB', 'regusense')}"
-    ),
-)
 
-# ─── Engine ───────────────────────────────────────────────────────────────────
-engine: AsyncEngine = create_async_engine(
-    _DATABASE_URL,
-    echo=os.getenv("SQL_ECHO", "false").lower() == "true",  # SQL debug logu
-    pool_size=int(os.getenv("PG_POOL_SIZE", "5")),
-    max_overflow=int(os.getenv("PG_MAX_OVERFLOW", "10")),
-    pool_pre_ping=True,  # Stale bağlantıları temizler
-)
-
-# ─── Session Factory ──────────────────────────────────────────────────────────
-AsyncSessionFactory: async_sessionmaker[AsyncSession] = async_sessionmaker(
-    bind=engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-    autoflush=False,
-)
-
-logger.info(
-    "PostgreSQL engine oluşturuldu: %s",
-    _DATABASE_URL.split("@")[-1],  # Şifreyi loglamıyoruz
-)
-
-
-# ─── Context Manager ──────────────────────────────────────────────────────────
 @asynccontextmanager
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
     """
@@ -83,15 +39,8 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
     Yields:
         AsyncSession: Aktif SQLAlchemy oturumu
     """
-    session: AsyncSession = AsyncSessionFactory()
-    try:
+    async with get_async_session() as session:
         yield session
-        await session.commit()
-    except Exception:
-        await session.rollback()
-        raise
-    finally:
-        await session.close()
 
 
 # ─── Schema Oluşturma Yardımcısı ─────────────────────────────────────────────
@@ -103,7 +52,7 @@ async def create_all_tables() -> None:
     """
     from database.models import Base  # döngüsel import'u önlemek için lazy
 
-    async with engine.begin() as conn:
+    async with get_engine().begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         logger.info("Tüm tablolar oluşturuldu (create_all)")
 
@@ -114,6 +63,16 @@ async def drop_all_tables() -> None:
     """
     from database.models import Base
 
-    async with engine.begin() as conn:
+    async with get_engine().begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         logger.warning("Tüm tablolar silindi (drop_all)")
+
+
+def __getattr__(name: str):
+    # Backward compatibility: `engine` and `AsyncSessionFactory` used to be
+    # module-level objects created at import time.
+    if name == "engine":
+        return get_engine()
+    if name == "AsyncSessionFactory":
+        return get_session_factory()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

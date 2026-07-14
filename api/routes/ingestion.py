@@ -2,7 +2,7 @@
 Data Ingestion API Routes.
 """
 
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from pathlib import Path
 import json
 import tempfile
@@ -15,12 +15,16 @@ from api.schemas import (
     TaskStatusResponse,
     TaskStatus,
 )
-from core.deps import get_memory
+from core.deps import get_memory, verify_api_key
 from core.logging import get_logger
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/api/v1", tags=["Ingestion"])
+router = APIRouter(
+    prefix="/api/v1",
+    tags=["Ingestion"],
+    dependencies=[Depends(verify_api_key)],
+)
 
 
 @router.post(

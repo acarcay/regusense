@@ -40,7 +40,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from database.models import Base, Speaker, Statement, Source, normalize_speaker_name, generate_content_hash
-from database.session import async_engine, get_async_session
+from database.session import get_async_session, get_engine
 
 
 # ==============================================================================
@@ -267,7 +267,7 @@ async def run_migration(resume: bool = False):
     
     # Initialize database tables
     print("📦 Creating database tables...")
-    async with async_engine.begin() as conn:
+    async with get_engine().begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     print("   ✅ Tables created")
     

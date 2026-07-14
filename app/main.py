@@ -11,7 +11,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from core.config import settings
+from config.settings import settings
 from core.logging import setup_logging, get_logger, RequestContext
 
 

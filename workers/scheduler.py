@@ -21,9 +21,9 @@ from apscheduler.triggers.cron import CronTrigger
 
 from scrapers.ekap_scraper import EkapScraper
 from scrapers.resmi_gazete_scraper import ResmiGazeteScraper
-from main import run_agent_pipeline
+from pipeline.intelligence import run_intelligence_pipeline
 
-from core.logging_config import setup_logging
+from core.logging import setup_logging
 from config.settings import settings
 
 # Configure logging
@@ -54,11 +54,11 @@ async def task_resmi_gazete_scraper():
 
 
 async def task_intelligence_pipeline():
-    """Run the main LangGraph agent pipeline to process newly ingested documents."""
-    logger.info("=== Starting Intelligence Agent Pipeline Task ===")
+    """Run the intelligence pipeline (Hunter + Temporal Analysis) on newly ingested data."""
+    logger.info("=== Starting Intelligence Pipeline Task ===")
     try:
-        # We can use a relatively large batch size for the nightly run
-        summary = await run_agent_pipeline(batch_size=100, dry_run=False)
+        # EKAP/Resmi Gazete scrapers already ran at 01:00/02:00, so look back 1 day
+        summary = await run_intelligence_pipeline(ekap_days=1)
         logger.info(f"Pipeline Completed: {summary}")
     except Exception as e:
         logger.error(f"Intelligence Pipeline Task Failed: {e}", exc_info=True)

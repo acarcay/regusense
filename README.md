@@ -26,12 +26,14 @@ ReguSense monitors Turkish Grand National Assembly (TBMM) proceedings, public pr
 
 ## ✨ Key Features
 
-### 🤖 Multi-Agent Pipeline (LangGraph)
-An automated pipeline utilizing LangGraph:
-- **IngestionAgent**: Pulls pending documents from PostgreSQL.
-- **ExtractionAgent**: Extracts entities and writes to Neo4j.
-- **FactCheckAgent**: Uses ChromaDB + Gemini LLM for contradiction detection.
-- **PublishingAgent**: Generates Insight Cards (PDFs) and prepares tweets.
+### 🤖 Multi-Agent Analysis (LangGraph)
+A multi-agent workflow (`agents/`) that analyzes political statements end to end:
+- **Watchdog**: Scores newsworthiness and filters routine/procedural content.
+- **Archivist**: Queries internal databases (PostgreSQL, ChromaDB) for prior statements.
+- **Searcher**: Performs external web search when internal evidence is thin.
+- **Analyst**: LLM reasoning over the evidence chain (loops back to Searcher if needed).
+- **Editor**: Formats the final contradiction report.
+- **Human Approval**: Human-in-the-loop checkpoint before publishing.
 
 ### 🧠 Intelligence & Contradiction Engine
 - Semantic search using RAG (Retrieval Augmented Generation) with ChromaDB.
@@ -55,7 +57,8 @@ An automated pipeline utilizing LangGraph:
 
 ```
 regusense/
-├── app.py                    # Streamlit Dashboard
+├── streamlit_app.py          # Streamlit Dashboard
+├── agents/                   # LangGraph multi-agent workflow (Watchdog → … → Human Approval)
 ├── main.py                   # CLI Pipeline Entry Point
 ├── api/                      # FastAPI endpoints
 ├── core/                     # Core business logic
@@ -103,9 +106,9 @@ Ensure you set up your `GEMINI_API_KEY`, PostgreSQL URI, and Neo4j credentials i
 
 ### 3. Run the Application
 
-**Run Multi-Agent Pipeline:**
+**Run Multi-Agent Analysis on a statement:**
 ```bash
-python main.py --agent-pipeline --batch-size 20
+python main.py --agent --query "Enflasyon tek haneye düşecek" --speaker "Mehmet Şimşek"
 ```
 
 **Run Full Intelligence Scan (EKAP + Hunter + Temporal Analysis):**
@@ -115,7 +118,7 @@ python main.py --intelligence-scan --ekap-days 30
 
 **Streamlit Dashboard:**
 ```bash
-streamlit run app.py
+streamlit run streamlit_app.py
 ```
 
 **Interactive Contradiction Check:**
@@ -145,9 +148,12 @@ python main.py --query "Enflasyon tek haneye düşecek" --speaker "Mehmet Şimş
 
 ## 🔐 Security & Operations
 
-- API keys and DB credentials securely stored in `.env`.
+- API keys and DB credentials securely stored in `.env` (never committed).
+- REST API protected by `X-API-Key` authentication — set `REGUSENSE_API_AUTH_KEY` in `.env`.
+- CORS restricted to explicitly configured origins (`REGUSENSE_CORS_ORIGINS`).
 - Asynchronous data processing via Celery and Redis to prevent blocking.
-- Configured structured logging (`pipeline.log`) for system observability.
+- Configured structured logging (`data/logs/`) for system observability.
+- CI (GitHub Actions) runs lint + unit tests on every push and pull request.
 
 ---
 
