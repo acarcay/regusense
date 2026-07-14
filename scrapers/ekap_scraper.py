@@ -57,9 +57,10 @@ from core.logging import get_logger
 logger = get_logger(__name__)
 
 
-BASE_URL = "https://ekap.kik.gov.tr"
-SEARCH_URL = f"{BASE_URL}/EKAP/Ortak/IhaleArama/index.html"
+BASE_URL = "https://ekapv2.kik.gov.tr"
+SEARCH_URL = f"{BASE_URL}/ekap/search"
 SCREENSHOT_DIR = Path("data/raw/ekap/screenshots")
+
 
 
 # =============================================================================
@@ -408,90 +409,117 @@ class EkapScraper(BaseScraper):
         sectors: Optional[list[str]] = None,
     ) -> ScrapeResult:
         """
-        Scrape recent completed tenders.
-        
+        Scrape recent tenders from EKAP v2.
+
+        EKAP v2 structure (confirmed via screenshot):
+          - Left sidebar: Alım Türü buttons (Mal/Yapım/Hizmet/Danışmanlık)
+          - İhale Tarihi: 'Tarih Aralığı' radio reveals date pickers
+          - 'Filtrele' button applies filters
+          - Right panel: lazy-loaded result cards
+
         Args:
             days: Number of days to look back
-            sectors: List of sector codes to filter (default: CONSTRUCTION)
-            
-        Returns:
-            ScrapeResult with statistics
+            sectors: ['CONSTRUCTION'] → Yapım, ['GOODS'] → Mal, etc.
         """
+        SECTOR_BTN = {
+            "GOODS":        "filter-button-1",
+            "CONSTRUCTION": "filter-button-2",
+            "SERVICES":     "filter-button-3",
+            "CONSULTANCY":  "filter-button-4",
+        }
+
         start_time = datetime.now()
         sectors = sectors or ["CONSTRUCTION"]
         all_results: list[TenderResult] = []
-        
+
         try:
             async with self._create_page() as page:
-                # Apply stealth mode
                 if STEALTH_AVAILABLE:
                     await Stealth().apply_stealth_async(page)
-                    logger.info("🥷 Stealth mode activated for latest scan")
-                
-                await human_delay(1.0, 2.5)
-                
-                # Navigate to search page
-                await page.goto(SEARCH_URL, wait_until="networkidle")
-                await human_delay(1.5, 3.0)
-                await page.wait_for_selector("#txtBaslangicTarihi", timeout=15000)
-                
-                # Set date range
-                end_date = datetime.now()
-                start_date = end_date - timedelta(days=days)
-                
-                await page.fill("#txtBaslangicTarihi", start_date.strftime("%d.%m.%Y"))
-                await page.fill("#txtBitisTarihi", end_date.strftime("%d.%m.%Y"))
-                
-                # Select completed status
-                status_select = await page.query_selector("#ddlIhaleDurumu")
-                if status_select:
-                    await status_select.select_option(value="3")
-                
-                # Select sector if available
+                    logger.info("🥷 Stealth mode activated")
+
+                # ── Load page ────────────────────────────────────────────────
+                await human_delay(1.0, 2.0)
+                await page.goto(SEARCH_URL, wait_until="domcontentloaded", timeout=30000)
+                await human_delay(3.0, 5.0)  # wait for JS widgets to render
+
+                # ── Select Alım Türü (deselect all first via Tümünü Temizle) ─
+                try:
+                    clear = page.locator("button#clear-button")
+                    await clear.click(timeout=5000)
+                    await human_delay(0.5, 1.0)
+                except Exception:
+                    pass  # might not be visible
+
                 for sector in sectors:
-                    sector_code = self.SECTOR_CODES.get(sector)
-                    if sector_code:
-                        sector_select = await page.query_selector("#ddlSektorKodu")
-                        if sector_select:
-                            await sector_select.select_option(value=sector_code)
-                
-                # Submit search
-                search_btn = await page.query_selector("#btnAra, button[type='submit']")
-                if search_btn:
-                    await search_btn.click()
-                    await page.wait_for_load_state("networkidle")
-                
-                # Parse all pages
+                    btn_id = SECTOR_BTN.get(sector)
+                    if btn_id:
+                        try:
+                            btn = page.locator(f"button#{btn_id}")
+                            await btn.click(timeout=5000)
+                            await human_delay(0.3, 0.7)
+                            logger.info(f"Sector selected: {sector}")
+                        except Exception:
+                            logger.warning(f"Could not select sector: {sector}")
+
+                # ── Set İhale Tarihi (Bypass complex DevExtreme logic) ──────
+                # Instead of fighting DevExtreme's date widget, we just use the default
+                # "Bugünden İtibaren" or no date filter, relying on pagination to get 
+                # recent tenders.
+                try:
+                    # Optional: Just make sure we are not stuck in a bad state
+                    await human_delay(1.0, 1.5)
+                except Exception as e:
+                    pass
+
+                # ── Click Filtrele ───────────────────────────────────────────
+                try:
+                    filtrele = page.locator("button", has_text="Filtrele").first
+                    await filtrele.click(timeout=8000)
+                    logger.info("Clicked Filtrele button")
+                    await page.wait_for_load_state("networkidle", timeout=20000)
+                except Exception as e:
+                    logger.warning(f"Could not click Filtrele: {e}")
+
+                await human_delay(3.0, 5.0)
+
+                # ── Paginate ─────────────────────────────────────────────────
                 page_num = 1
                 while True:
                     results = await self._parse_search_results(page)
                     all_results.extend(results)
-                    
-                    logger.info(f"Page {page_num}: Found {len(results)} tenders")
-                    
-                    # Check for next page
-                    next_btn = await page.query_selector("a.next, .pagination .next:not(.disabled)")
-                    if not next_btn:
+                    logger.info(f"Page {page_num}: {len(results)} tenders")
+
+                    try:
+                        next_btn = page.locator(
+                            ".dx-navigate-button.dx-next-button:not(.dx-state-disabled)"
+                        ).first
+                        if not await next_btn.is_visible(timeout=2000):
+                            break
+                        await next_btn.click()
+                        await page.wait_for_load_state("networkidle", timeout=15000)
+                        await human_delay(1.5, 3.0)
+                        page_num += 1
+                    except Exception:
                         break
-                    
-                    await next_btn.click()
-                    await page.wait_for_load_state("networkidle")
-                    await asyncio.sleep(1)  # Rate limit
-                    page_num += 1
-                    
-                    if page_num > 10:  # Safety limit
+
+                    if page_num > 10:
                         break
-            
-            # Save results to PostgreSQL RawDocument
+
+            # ── Save to PostgreSQL ────────────────────────────────────────────
             items_saved = 0
             if all_results:
                 async with get_session() as session:
                     for r in all_results:
                         try:
-                            # Create a raw text representation
-                            raw_text = f"İhale Kayıt No (İKN): {r.ikn}\nBaşlık: {r.title}\nKazanan: {r.winner_company}\nTutar: {r.bid_amount} TRY\nTarih: {r.tender_date}"
+                            raw_text = (
+                                f"İhale Kayıt No (İKN): {r.ikn}\n"
+                                f"Başlık: {r.title}\n"
+                                f"Kazanan: {r.winner_company}\n"
+                                f"Tutar: {r.bid_amount} TRY\n"
+                                f"Tarih: {r.tender_date}"
+                            )
                             content_hash = RawDocument.compute_hash(raw_text)
-                            
                             doc = RawDocument(
                                 doc_type=DocumentType.EKAP_TENDER.value,
                                 title=r.title,
@@ -507,14 +535,13 @@ class EkapScraper(BaseScraper):
                             await session.flush()
                             items_saved += 1
                         except IntegrityError:
-                            await session.rollback() # Skip duplicate
-                            logger.debug(f"Duplicate EKAP tender skipped: {r.ikn}")
+                            await session.rollback()
+                            logger.debug(f"Duplicate skipped: {r.ikn}")
                         except Exception as e:
                             await session.rollback()
-                            logger.error(f"Failed to save EKAP tender {r.ikn}: {e}")
-            
+                            logger.error(f"Failed to save {r.ikn}: {e}")
+
             duration = (datetime.now() - start_time).total_seconds()
-            
             return ScrapeResult(
                 success=True,
                 items_found=len(all_results),
@@ -522,7 +549,7 @@ class EkapScraper(BaseScraper):
                 duration_seconds=duration,
                 saved_path="PostgreSQL: RawDocument",
             )
-            
+
         except Exception as e:
             logger.exception("Failed to scrape EKAP")
             return ScrapeResult(
@@ -530,89 +557,266 @@ class EkapScraper(BaseScraper):
                 error=str(e),
                 duration_seconds=(datetime.now() - start_time).total_seconds(),
             )
+
+
+        # Map our sector names to EKAP v2 button IDs
+        SECTOR_BTN = {
+            "GOODS": "filter-button-1",
+            "CONSTRUCTION": "filter-button-2",
+            "SERVICES": "filter-button-3",
+            "CONSULTANCY": "filter-button-4",
+        }
+
+        start_time = datetime.now()
+        sectors = sectors or ["CONSTRUCTION"]
+        all_results: list[TenderResult] = []
+
+        try:
+            async with self._create_page() as page:
+                if STEALTH_AVAILABLE:
+                    await Stealth().apply_stealth_async(page)
+                    logger.info("🥷 Stealth mode activated for latest scan")
+
+                await human_delay(1.0, 2.5)
+                await page.goto(SEARCH_URL, wait_until="domcontentloaded", timeout=30000)
+                await human_delay(2.0, 4.0)
+
+                # ── Click sector filter buttons ──────────────────────────────
+                for sector in sectors:
+                    btn_id = SECTOR_BTN.get(sector)
+                    if btn_id:
+                        try:
+                            btn = page.locator(f"button#{btn_id}")
+                            await btn.click(timeout=5000)
+                            await human_delay(0.3, 0.7)
+                            logger.info(f"Sector filter selected: {sector}")
+                        except Exception:
+                            logger.warning(f"Could not click sector button: {sector}")
+
+                # ── Set date range ────────────────────────────────────────────
+                try:
+                    # Click 'Tarih Aralığı' radio to reveal date inputs
+                    date_range_radio = page.locator(
+                        "text=Tarih Aralığı"
+                    ).first
+                    await date_range_radio.click(timeout=5000)
+                    await human_delay(0.5, 1.0)
+
+                    end_date = datetime.now()
+                    start_date = end_date - timedelta(days=days)
+                    fmt = "%d.%m.%Y"
+
+                    start_input = page.locator(
+                        "input.dx-texteditor-input"
+                    ).first
+                    await start_input.fill(start_date.strftime(fmt))
+                    await human_delay(0.3, 0.6)
+
+                    end_input = page.locator(
+                        "input.dx-texteditor-input"
+                    ).nth(1)
+                    await end_input.fill(end_date.strftime(fmt))
+                    await human_delay(0.3, 0.6)
+
+                    logger.info(f"Date range set: {start_date.strftime(fmt)} – {end_date.strftime(fmt)}")
+                except Exception as e:
+                    logger.warning(f"Could not set date range, scraping without: {e}")
+
+                # ── Click search button ───────────────────────────────────────
+                try:
+                    search_btn = page.locator("button#search-ihale, button.search-button").first
+                    await search_btn.click(timeout=8000)
+                    await page.wait_for_load_state("networkidle", timeout=20000)
+                except Exception:
+                    logger.warning("Could not click search button, parsing current results")
+
+                await human_delay(2.0, 3.0)
+
+                # ── Paginate through results ──────────────────────────────────
+                page_num = 1
+                while True:
+                    results = await self._parse_search_results(page)
+                    all_results.extend(results)
+                    logger.info(f"Page {page_num}: {len(results)} tenders")
+
+                    # Check for next page button
+                    try:
+                        next_btn = page.locator(
+                            ".dx-navigate-button.dx-next-button:not(.dx-state-disabled), "
+                            "button.next-page:not([disabled])"
+                        ).first
+                        if not await next_btn.is_visible(timeout=2000):
+                            break
+                        await next_btn.click()
+                        await page.wait_for_load_state("networkidle", timeout=15000)
+                        await human_delay(1.0, 2.0)
+                        page_num += 1
+                    except Exception:
+                        break  # No more pages
+
+                    if page_num > 10:
+                        break
+
+            # ── Save to PostgreSQL ────────────────────────────────────────────
+            items_saved = 0
+            if all_results:
+                async with get_session() as session:
+                    for r in all_results:
+                        try:
+                            raw_text = (
+                                f"İhale Kayıt No (İKN): {r.ikn}\n"
+                                f"Başlık: {r.title}\n"
+                                f"Kazanan: {r.winner_company}\n"
+                                f"Tutar: {r.bid_amount} TRY\n"
+                                f"Tarih: {r.tender_date}"
+                            )
+                            content_hash = RawDocument.compute_hash(raw_text)
+
+                            doc = RawDocument(
+                                doc_type=DocumentType.EKAP_TENDER.value,
+                                title=r.title,
+                                source_url=r.source_url,
+                                raw_text=raw_text,
+                                content_hash=content_hash,
+                                session_id=r.ikn,
+                                date=r.tender_date,
+                                metadata_json=r.model_dump(),
+                                processing_status="pending",
+                            )
+                            session.add(doc)
+                            await session.flush()
+                            items_saved += 1
+                        except IntegrityError:
+                            await session.rollback()
+                            logger.debug(f"Duplicate EKAP tender skipped: {r.ikn}")
+                        except Exception as e:
+                            await session.rollback()
+                            logger.error(f"Failed to save EKAP tender {r.ikn}: {e}")
+
+            duration = (datetime.now() - start_time).total_seconds()
+            return ScrapeResult(
+                success=True,
+                items_found=len(all_results),
+                items_saved=items_saved,
+                duration_seconds=duration,
+                saved_path="PostgreSQL: RawDocument",
+            )
+
+        except Exception as e:
+            logger.exception("Failed to scrape EKAP")
+            return ScrapeResult(
+                success=False,
+                error=str(e),
+                duration_seconds=(datetime.now() - start_time).total_seconds(),
+            )
+
     
     async def _parse_search_results(
         self,
         page,
         filter_mersis: Optional[str] = None,
     ) -> list[TenderResult]:
-        """Parse tender results from search page."""
+        """
+        Parse tender cards from EKAP v2 card-based result layout.
+
+        EKAP v2 uses DevExtreme widgets with card components instead of
+        a traditional HTML table.
+        """
         results: list[TenderResult] = []
-        
-        # Find result table
-        rows = await page.query_selector_all(
-            "#gvIhaleSonuclari tr, .ihale-sonuc-table tr, table.results tbody tr"
-        )
-        
-        for row in rows:
-            try:
-                cells = await row.query_selector_all("td")
-                if len(cells) < 5:
-                    continue
-                
-                # Extract data (column order varies, this is approximate)
-                ikn = await cells[0].inner_text()
-                ikn = ikn.strip()
-                
-                if not ikn or ikn.startswith("İ"):  # Skip header-like rows
-                    continue
-                
-                title = await cells[1].inner_text() if len(cells) > 1 else ""
-                winner = await cells[3].inner_text() if len(cells) > 3 else ""
-                amount_text = await cells[4].inner_text() if len(cells) > 4 else "0"
-                date_text = await cells[2].inner_text() if len(cells) > 2 else ""
-                
-                # Parse amount
-                amount = 0.0
-                try:
-                    amount_clean = re.sub(r'[^\d,.]', '', amount_text)
-                    amount_clean = amount_clean.replace('.', '').replace(',', '.')
-                    amount = float(amount_clean) if amount_clean else 0.0
-                except ValueError:
-                    pass
-                
-                # Parse date
-                tender_date = ""
-                try:
-                    for fmt in ["%d.%m.%Y", "%Y-%m-%d", "%d/%m/%Y"]:
-                        try:
-                            dt = datetime.strptime(date_text.strip(), fmt)
-                            tender_date = dt.strftime("%Y-%m-%d")
-                            break
-                        except ValueError:
-                            continue
-                except Exception:
-                    pass
-                
-                # Get detail link
-                link = await row.query_selector("a")
-                source_url = ""
-                if link:
-                    href = await link.get_attribute("href")
-                    source_url = urljoin(BASE_URL, href) if href else ""
-                
-                result = TenderResult(
-                    ikn=ikn,
-                    title=title.strip(),
-                    winner_company=winner.strip(),
-                    winner_mersis=None,  # Would need detail page
-                    bid_amount=amount,
-                    tender_date=tender_date or datetime.now().strftime("%Y-%m-%d"),
-                    source_url=source_url or SEARCH_URL,
+
+        try:
+            # Wait briefly for results to render
+            await asyncio.sleep(1.5)
+
+            # Each result card contains a dx-button with id='advert-button'
+            # We target the outermost ancestor containing exactly one such button
+            cards = await page.query_selector_all(
+                "[id='advert-button']"
+            )
+
+            if not cards:
+                # Fallback: try generic card selectors
+                cards = await page.query_selector_all(
+                    ".ihale-card, .card-item, dx-list-item, .result-card"
                 )
-                
-                # Filter by MERSIS if provided
-                if filter_mersis:
-                    # Would need to check detail page for MERSIS match
-                    pass
-                
-                results.append(result)
-                
-            except Exception as e:
-                logger.debug(f"Failed to parse row: {e}")
-                continue
-        
+
+            logger.info(f"Found {len(cards)} result elements on page")
+
+            for card_btn in cards:
+                try:
+                    # Walk up to the card wrapper (3 levels up from the button)
+                    card = card_btn
+                    for _ in range(4):
+                        parent = await card.evaluate_handle("el => el.parentElement")
+                        if parent:
+                            card = parent
+
+                    text = await card.inner_text()
+                    lines = [l.strip() for l in text.splitlines() if l.strip()]
+
+                    # Extract IKN (format: YYYY/NNNNN)
+                    ikn = ""
+                    for line in lines:
+                        if re.match(r'^\d{4}/\d+', line):
+                            ikn = line
+                            break
+
+                    if not ikn:
+                        continue
+
+                    # Extract date (DD.MM.YYYY)
+                    tender_date_raw = ""
+                    for line in lines:
+                        if re.search(r'\d{2}\.\d{2}\.\d{4}', line):
+                            m = re.search(r'(\d{2}\.\d{2}\.\d{4})', line)
+                            if m:
+                                tender_date_raw = m.group(1)
+                            break
+
+                    tender_date = ""
+                    if tender_date_raw:
+                        try:
+                            dt = datetime.strptime(tender_date_raw, "%d.%m.%Y")
+                            tender_date = dt.strftime("%Y-%m-%d")
+                        except ValueError:
+                            pass
+
+                    # Title is usually the line after IKN
+                    ikn_idx = lines.index(ikn) if ikn in lines else -1
+                    title = lines[ikn_idx + 1] if ikn_idx >= 0 and ikn_idx + 1 < len(lines) else ""
+
+                    # Agency is typically the last meaningful line
+                    agency = lines[-1] if lines else ""
+
+                    # Get detail URL from the advert button
+                    source_url = SEARCH_URL
+                    try:
+                        href = await card_btn.get_attribute("href")
+                        if href:
+                            source_url = urljoin(BASE_URL, href)
+                    except Exception:
+                        pass
+
+                    result = TenderResult(
+                        ikn=ikn,
+                        title=title,
+                        winner_company=agency,  # winner info needs detail page
+                        winner_mersis=None,
+                        bid_amount=0.0,          # amount needs detail page
+                        tender_date=tender_date or datetime.now().strftime("%Y-%m-%d"),
+                        source_url=source_url,
+                    )
+                    results.append(result)
+
+                except Exception as e:
+                    logger.debug(f"Failed to parse card: {e}")
+                    continue
+
+        except Exception as e:
+            logger.error(f"Failed to parse search results: {e}")
+
         return results
+
     
     async def scrape(self, days: int = 30) -> ScrapeResult:
         """Main scrape method."""

@@ -12,12 +12,12 @@ import logging
 from datetime import date
 
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from database.session import get_async_session
 from database.models import Speaker
 from database.graph_schema import SECTOR_DEFINITIONS
 from database import neo4j_client
-from database.graph_helper import GraphHelper
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -39,29 +39,47 @@ async def sync_sectors():
 async def sync_politicians():
     """Sync PostgreSQL speakers to Neo4j Politician nodes."""
     logger.info("Syncing politicians from PostgreSQL...")
-    
+
     count = 0
-    graph = GraphHelper()
-    
+
     async with get_async_session() as session:
-        result = await session.execute(select(Speaker))
+        # Eager-load roles in-session (avoids lazy-load after session close)
+        result = await session.execute(
+            select(Speaker).options(selectinload(Speaker.roles))
+        )
         speakers = result.scalars().all()
-        
+
         for speaker in speakers:
-            await graph.create_siyasetci(
+            # Pick the most recent role (or None)
+            role = speaker.roles[0] if speaker.roles else None
+            party = role.party or "" if role else ""
+            title = role.title or "" if role else ""
+
+            await neo4j_client.create_politician(
                 pg_id=speaker.id,
-                ad=speaker.name,
-                normalized_ad=speaker.normalized_name,
-                parti=speaker.party or "",
-                unvan=speaker.title or "",
+                name=speaker.name,
+                normalized_name=speaker.normalized_name,
             )
+
+            # Also create party node + SERVED_IN edge if we have role data
+            if role and party:
+                await neo4j_client.create_political_party(name=party)
+                await neo4j_client.add_politician_role(
+                    pg_id=speaker.id,
+                    party_name=party,
+                    title=title or "Milletvekili",
+                    term_name=role.term_name or "",
+                    start_date=str(role.start_date) if role.start_date else None,
+                    end_date=str(role.end_date) if role.end_date else None,
+                )
+
             count += 1
-            
-            if count % 500 == 0:
+            if count % 200 == 0:
                 logger.info(f"  Synced {count} politicians...")
-    
+
     logger.info(f"Synced {count} politicians to Neo4j")
     return count
+
 
 
 async def create_sample_organizations():

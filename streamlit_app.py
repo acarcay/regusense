@@ -346,11 +346,12 @@ def main():
     # Main Content - Tabbed Interface
     # =========================================================================
     
-    tab_manual, tab_live, tab_agent, tab_hitl = st.tabs([
+    tab_manual, tab_live, tab_agent, tab_hitl, tab_data = st.tabs([
         "📝 Manuel Analiz", 
         "🔴 LIVE MODE", 
         "🤖 Agent Pipeline",
-        "🔗 Bağ Onayları"
+        "🔗 Bağ Onayları",
+        "📂 Ham Veriler (EKAP & TBMM)"
     ])
     
     # =========================================================================
@@ -1189,9 +1190,66 @@ def main():
                             if st.button(f"📂 PDF Aç", key=f"open_pdf_{i}"):
                                 open_pdf(str(pdf_path), page=page)
     
+    with tab_data:
+        st.subheader("📂 Veritabanı Kayıtları (Ham Veriler)")
+        st.markdown("Sistem tarafından toplanan ve analiz için bekleyen en güncel kayıtlar aşağıda kategorize edilmiştir.")
+        
+        try:
+            import pandas as pd
+            import sqlalchemy as sa
+            from config.settings import settings
+            from database.models import RawDocument
+            
+            # Use synchronous engine for Streamlit to avoid asyncio event loop closure issues
+            sync_url = settings.database_url.replace("+asyncpg", "") if settings.database_url else "postgresql://regusense:regusense@localhost:5432/regusense"
+            sync_engine = sa.create_engine(sync_url)
+            
+            with sa.orm.Session(sync_engine) as session:
+                # Fetch EKAP
+                ekap_docs = session.query(RawDocument).filter(RawDocument.doc_type == "EKAP_TENDER").order_by(RawDocument.created_at.desc()).limit(50).all()
+                # Fetch Commission
+                comm_docs = session.query(RawDocument).filter(RawDocument.doc_type == "TBMM_TRANSCRIPT").order_by(RawDocument.created_at.desc()).limit(50).all()
+            
+            ekap_tab, comm_tab = st.tabs(["🏢 EKAP İhaleleri", "🏛️ TBMM Komisyon Tutanakları"])
+            
+            with ekap_tab:
+                if ekap_docs:
+                    tender_data = []
+                    for t in ekap_docs:
+                        meta = t.metadata_json or {}
+                        tender_data.append({
+                            "İKN": t.session_id,
+                            "Başlık": t.title,
+                            "Kazanan": meta.get("winner_company", "-"),
+                            "Tutar (TRY)": f"{meta.get('bid_amount', 0):,.2f}",
+                            "Tarih": t.date,
+                            "Eklenme": t.created_at.strftime("%Y-%m-%d %H:%M")
+                        })
+                    st.dataframe(pd.DataFrame(tender_data), use_container_width=True, hide_index=True)
+                else:
+                    st.info("Henüz veritabanında EKAP ihalesi bulunmuyor.")
+                    
+            with comm_tab:
+                if comm_docs:
+                    comm_data = []
+                    for c in comm_docs:
+                        comm_data.append({
+                            "Tutanak Başlığı": c.title,
+                            "Oturum/Tarih": c.date or "-",
+                            "Durum": c.processing_status,
+                            "Eklenme": c.created_at.strftime("%Y-%m-%d %H:%M")
+                        })
+                    st.dataframe(pd.DataFrame(comm_data), use_container_width=True, hide_index=True)
+                else:
+                    st.info("Henüz veritabanında Komisyon tutanağı bulunmuyor.")
+                
+        except Exception as e:
+            st.error(f"Veriler yüklenirken hata oluştu: {e}")
+            
     # =========================================================================
     # Footer
     # =========================================================================
+
     
     st.divider()
     st.caption(
